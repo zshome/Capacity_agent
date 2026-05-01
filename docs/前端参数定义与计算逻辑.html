@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Capacity Agent 前端参数定义与计算逻辑</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      white-space: pre-wrap;
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    html { -webkit-text-size-adjust: 100%; }
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Capacity Agent 前端参数定义与计算逻辑</h1>
+</header>
+<h1 id="capacity-agent-前端参数定义与计算逻辑">Capacity Agent
+前端参数定义与计算逻辑</h1>
+<blockquote>
+<p>版本：1.0 | 更新日期：2026-04-29</p>
+</blockquote>
+<hr />
+<h2 id="目录">目录</h2>
+<ol type="1">
+<li><a href="#1-运行概览">运行概览</a></li>
+<li><a href="#2-rccp-热点">RCCP 热点</a></li>
+<li><a href="#3-瓶颈评分">瓶颈评分</a></li>
+<li><a href="#4-lp-优化器">LP 优化器</a></li>
+<li><a href="#5-des-仿真">DES 仿真</a></li>
+<li><a href="#6-生产计划">生产计划</a></li>
+<li><a href="#7-output-视角">Output 视角</a></li>
+<li><a href="#8-what-if-分析">What-if 分析</a></li>
+<li><a href="#9-情景分类">情景分类</a></li>
+</ol>
+<hr />
+<h2 id="运行概览">1. 运行概览</h2>
+<h3 id="整体-loading">1.1 整体 Loading</h3>
+<p><strong>定义：</strong>
+所有机台组的加权平均利用率，反映整体产能紧张程度。</p>
+<p><strong>前端字段：</strong>
+<code>analysis.rccp.overall_loading_pct</code></p>
+<p><strong>计算公式：</strong></p>
+<pre><code>整体Loading = Σ(所有机台组需求小时) / Σ(所有机台组可用小时) × 100%</code></pre>
+<p><strong>计算过程：</strong></p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 1: 汇总所有机台组的需求小时</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>overall_demand <span class="op">=</span> Σ demand_hours[tg]  <span class="co"># 遍历所有tool_group</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 2: 汇总所有机台组的可用小时</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>overall_available <span class="op">=</span> Σ available_hours[tg]</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 3: 计算整体利用率</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>overall_loading_pct <span class="op">=</span> (overall_demand <span class="op">/</span> overall_available) × <span class="dv">100</span></span></code></pre></div>
+<p><strong>数据来源：</strong> | 参数 | API | 字段 | |——|—–|——| |
+demand_hours | <code>/rccp/compute</code> |
+<code>loading_table[].demand_hours</code> | | available_hours |
+<code>/rccp/compute</code> |
+<code>loading_table[].available_hours</code> |</p>
+<p><strong>业务含义：</strong> | Loading范围 | 状态 | 业务解读 |
+|————-|——|———-| | &lt; 75% | 健康 | 产能充足，可接更多订单 | | 75-85% |
+警告 | 产能紧张，需关注瓶颈 | | 85-100% | 临界 | 产能不足，需调整计划 |
+| &gt; 100% | 过载 | 无法满足需求，必须削减 |</p>
+<p><strong>示例：</strong></p>
+<pre><code>假设3个机台组:
+- LITHO_01: demand=2500h, avail=500h
+- ETCH_03: demand=2240h, avail=800h
+- DEPO_02: demand=400h, avail=400h
+
+整体Loading = (2500+2240+400)/(500+800+400) × 100%
+            = 5140/1700 × 100%
+            = 302%</code></pre>
+<hr />
+<h3 id="可行性feasible">1.2 可行性（feasible）</h3>
+<p><strong>定义：</strong> 当前需求计划是否在现有产能约束下可执行。</p>
+<p><strong>前端字段：</strong> <code>analysis.rccp.feasible</code></p>
+<p><strong>判断逻辑：</strong></p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>feasible <span class="op">=</span> <span class="va">True</span>  <span class="co"># 初始值</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> tool_group <span class="kw">in</span> loading_table:</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> tool_group.loading_pct <span class="op">&gt;=</span> <span class="dv">100</span><span class="op">%</span>:</span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>        feasible <span class="op">=</span> <span class="va">False</span>  <span class="co"># 任意机台过载 → 不可行</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>        <span class="cf">break</span></span></code></pre></div>
+<p><strong>状态分类阈值：</strong></p>
+<pre><code>loading_pct &gt;= 100%  → status = &quot;overload&quot;  → feasible = False
+loading_pct &gt;= 85%   → status = &quot;critical&quot;  → feasible仍True但需关注
+loading_pct &gt;= 75%   → status = &quot;warning&quot;   → feasible仍True但需预警
+loading_pct &lt; 75%    → status = &quot;healthy&quot;   → 正常</code></pre>
+<p><strong>数据来源：</strong> | 参数 | API | 计算位置 | |——|—–|———-| |
+loading_table | <code>/rccp/compute</code> | 后端 rccp.py |</p>
+<p><strong>业务含义：</strong> - <code>True</code>: 计划可执行，产能足够
+- <code>False</code>: 计划不可行，需削减或增加产能</p>
+<hr />
+<h3 id="主瓶颈primary_bottleneck">1.3 主瓶颈（primary_bottleneck）</h3>
+<p><strong>定义：</strong>
+三维瓶颈评分最高的机台组，是当前最需要关注的瓶颈。</p>
+<p><strong>前端字段：</strong>
+<code>analysis.bottleneck.primary_bottleneck</code></p>
+<p><strong>计算公式：</strong></p>
+<pre><code>瓶颈评分 = Loading权重 × Loading分 + Queue权重 × Queue分 + Drift权重 × Drift分</code></pre>
+<p><strong>权重配置：</strong></p>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>weights <span class="op">=</span> {</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;loading&quot;</span>: <span class="fl">0.5</span>,  <span class="co"># Loading维度权重50%</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;queue&quot;</span>: <span class="fl">0.3</span>,    <span class="co"># Queue维度权重30%</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;drift&quot;</span>: <span class="fl">0.2</span>,    <span class="co"># Drift维度权重20%</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<p><strong>各维度评分计算：</strong></p>
+<h4 id="loading评分">Loading评分</h4>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>loading_score <span class="op">=</span> <span class="bu">min</span>(loading_pct, <span class="fl">100.0</span>)  <span class="co"># 直接映射</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="co"># 97.9% loading → 97.9分</span></span></code></pre></div>
+<h4 id="queue评分见第3章详细说明">Queue评分（见第3章详细说明）</h4>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>wait_hours <span class="op">=</span> Kingman公式计算(utilization, service_rate, n_servers)</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>queue_score <span class="op">=</span> 映射函数(wait_hours)  <span class="co"># 0-100分</span></span></code></pre></div>
+<h4 id="drift评分">Drift评分</h4>
+<div class="sourceCode" id="cb10"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>drift_score <span class="op">=</span> 斜率评分 <span class="op">+</span> 加速度评分</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="co"># 基于历史4-8周loading趋势计算</span></span></code></pre></div>
+<p><strong>主瓶颈判定：</strong></p>
+<div class="sourceCode" id="cb11"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>bottlenecks.sort(key<span class="op">=</span>composite_score, reverse<span class="op">=</span><span class="va">True</span>)  <span class="co"># 按综合评分排序</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>primary_bottleneck <span class="op">=</span> bottlenecks[<span class="dv">0</span>].tool_group_id <span class="cf">if</span> bottlenecks[<span class="dv">0</span>].severity <span class="kw">in</span> (<span class="st">&quot;critical&quot;</span>, <span class="st">&quot;severe&quot;</span>) <span class="cf">else</span> <span class="va">None</span></span></code></pre></div>
+<p><strong>数据来源：</strong> | 参数 | API | 字段 | |——|—–|——| |
+loading_pct | <code>/rccp/compute</code> |
+<code>loading_table[].loading_pct</code> | | queue_score |
+<code>/bottleneck/analyze</code> |
+<code>bottlenecks[].queue_score</code> | | drift_score |
+<code>/bottleneck/analyze</code> |
+<code>bottlenecks[].drift_score</code> | | composite_score |
+<code>/bottleneck/analyze</code> |
+<code>bottlenecks[].composite_score</code> |</p>
+<hr />
+<h3 id="des-结论">1.4 DES 结论</h3>
+<p><strong>定义：</strong>
+离散事件仿真验证结果，反映排队效应对可行性的影响。</p>
+<p><strong>前端字段：</strong> <code>analysis.des.feasible</code></p>
+<p><strong>判断逻辑：</strong></p>
+<div class="sourceCode" id="cb12"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="co"># DES仿真运行一周(168小时)</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>avg_wait_time <span class="op">=</span> simulation_result.average_waiting_time</span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>max_wait_time <span class="op">=</span> simulation_result.max_waiting_time</span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a><span class="co"># 判断标准</span></span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> avg_wait_time <span class="op">&gt;</span> threshold_hours:  <span class="co"># 阈值通常为24h</span></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>    feasible <span class="op">=</span> <span class="va">False</span>  <span class="co"># 等待时间过长 → 仿真不可行</span></span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a><span class="cf">else</span>:</span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a>    feasible <span class="op">=</span> <span class="va">True</span></span></code></pre></div>
+<p><strong>数据来源：</strong> | 参数 | API | 字段 | |——|—–|——| |
+avg_wait_time | <code>/des/run</code> |
+<code>simulation.avg_wait_hours</code> | | feasible |
+<code>/des/run</code> | <code>simulation.feasible</code> |</p>
+<p><strong>业务含义：</strong> - <code>通过</code>: 排队效应对Cycle
+Time影响可控 - <code>风险</code>: 存在显著排队，需优化调度或增加产能</p>
+<hr />
+<h2 id="rccp-热点">2. RCCP 热点</h2>
+<h3 id="tool-group-id">2.1 Tool Group ID</h3>
+<p><strong>定义：</strong>
+机台组唯一标识符，代表一组功能相同的设备。</p>
+<p><strong>前端字段：</strong> <code>item.tool_group_id</code></p>
+<p><strong>数据来源：</strong> -
+后端：<code>route_master.tool_group_id</code>（工艺路线定义） -
+前端：<code>loading_table[].tool_group_id</code></p>
+<p><strong>业务含义：</strong> - 如 <code>LITHO_01</code>
+代表光刻区第一组设备 - 如 <code>ETCH_03</code> 代表刻蚀区第三组设备</p>
+<hr />
+<h3 id="demand-hours需求小时">2.2 Demand Hours（需求小时）</h3>
+<p><strong>定义：</strong> 该机台组为满足计划需求所需的总小时数。</p>
+<p><strong>前端字段：</strong> <code>item.demand_hours</code></p>
+<p><strong>计算公式：</strong></p>
+<pre><code>demand_hours[tg] = Σ(产品产量 × 产品在该机台的TC)</code></pre>
+<p><strong>计算过程：</strong></p>
+<div class="sourceCode" id="cb14"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 1: 构建产能矩阵贡献</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>contribution_matrix <span class="op">=</span> capacity_matrix × demand_plan</span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a><span class="co"># 即每个产品在每个机台的需求贡献</span></span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 2: 按机台聚合</span></span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> tg <span class="kw">in</span> tool_groups:</span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a>    demand_hours[tg] <span class="op">=</span> Σ contribution_matrix[product][tg]</span></code></pre></div>
+<p><strong>示例：</strong></p>
+<pre><code>LITHO_01 需求计算:
+- 28nm_DRAM_A: 1000片 × 2.5h/片 = 2500h
+- 64L_NAND_B: 800片 × 2.0h/片 = 1600h
+- 合计 = 2500 + 1600 = 4100h</code></pre>
+<p><strong>数据来源：</strong> | 参数 | 来源 | 字段 | |——|——|——| |
+demand_plan | <code>/rccp/compute</code>请求体 |
+<code>demand_plan</code> | | capacity_matrix |
+<code>/rccp/compute</code>请求体 | <code>capacity_matrix</code> |</p>
+<hr />
+<h3 id="available-hours可用小时">2.3 Available Hours（可用小时）</h3>
+<p><strong>定义：</strong> 该机台组本周可用的总产能小时。</p>
+<p><strong>前端字段：</strong> <code>item.available_hours</code></p>
+<p><strong>计算公式：</strong></p>
+<pre><code>available_hours = 设备数 × 168h × OEE</code></pre>
+<p><strong>计算过程：</strong></p>
+<div class="sourceCode" id="cb17"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 从OEE表获取</span></span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> tg <span class="kw">in</span> tool_groups:</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>    n_machines <span class="op">=</span> tool_groups[tg].n_machines</span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>    oee <span class="op">=</span> oee_table[tg].oee  <span class="co"># 综合设备效率</span></span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>    available_hours[tg] <span class="op">=</span> n_machines × <span class="dv">168</span> × oee</span></code></pre></div>
+<p><strong>示例：</strong></p>
+<pre><code>LITHO_01 可用产能:
+- 设备数: 8台
+- OEE: 75%
+- 本周可用 = 8 × 168h × 0.75 = 1008h</code></pre>
+<p><strong>数据来源：</strong> | 参数 | 来源 | 字段 | |——|——|——| |
+n_machines | Excel导入 | <code>tool_groups.n_machines</code> | | oee |
+Excel导入 | <code>oee.oee</code> | | available_hours | Excel导入或API |
+<code>oee.available_hours</code> |</p>
+<hr />
+<h3 id="loading利用率">2.4 Loading（利用率）</h3>
+<p><strong>定义：</strong>
+需求小时占可用小时的百分比，反映产能紧张程度。</p>
+<p><strong>前端字段：</strong> <code>item.loading_pct</code></p>
+<p><strong>计算公式：</strong></p>
+<pre><code>loading_pct = demand_hours / available_hours × 100%</code></pre>
+<p><strong>计算过程：</strong></p>
+<div class="sourceCode" id="cb20"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>loading_pct[tg] <span class="op">=</span> demand_hours[tg] <span class="op">/</span> available_hours[tg] × <span class="dv">100</span></span></code></pre></div>
+<p><strong>示例：</strong></p>
+<pre><code>LITHO_01 Loading:
+loading_pct = 4100h / 500h × 100% = 820%</code></pre>
+<p><strong>状态分类：</strong></p>
+<pre><code>loading &gt;= 100%  → overload  (红色)
+loading &gt;= 85%   → critical  (橙色)
+loading &gt;= 75%   → warning   (黄色)
+loading &lt; 75%    → healthy   (绿色)</code></pre>
+<hr />
+<h3 id="gap-hours产能缺口">2.5 Gap Hours（产能缺口）</h3>
+<p><strong>定义：</strong> 需求超出可用产能的小时数，正值表示缺口。</p>
+<p><strong>前端字段：</strong> <code>item.gap_hours</code></p>
+<p><strong>计算公式：</strong></p>
+<pre><code>gap_hours = demand_hours - available_hours</code></pre>
+<p><strong>示例：</strong></p>
+<pre><code>LITHO_01 缺口:
+gap_hours = 4100h - 500h = 3600h</code></pre>
+<p><strong>业务含义：</strong> - <code>gap &gt; 0</code>:
+产能不足，缺口小时数 - <code>gap ≤ 0</code>: 产能充足</p>
+<hr />
+<h3 id="status状态">2.6 Status（状态）</h3>
+<p><strong>定义：</strong> 机台组的产能健康状态。</p>
+<p><strong>前端字段：</strong> <code>item.status</code></p>
+<p><strong>分类阈值：</strong></p>
+<div class="sourceCode" id="cb25"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> classify_status(loading_pct):</span>
+<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> loading_pct <span class="op">&gt;=</span> <span class="dv">100</span><span class="op">%</span>: <span class="cf">return</span> <span class="st">&quot;overload&quot;</span></span>
+<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">elif</span> loading_pct <span class="op">&gt;=</span> <span class="dv">85</span><span class="op">%</span>: <span class="cf">return</span> <span class="st">&quot;critical&quot;</span></span>
+<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">elif</span> loading_pct <span class="op">&gt;=</span> <span class="dv">75</span><span class="op">%</span>: <span class="cf">return</span> <span class="st">&quot;warning&quot;</span></span>
+<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">else</span>: <span class="cf">return</span> <span class="st">&quot;healthy&quot;</span></span></code></pre></div>
+<hr />
+<h3 id="排序逻辑">2.7 排序逻辑</h3>
+<p><strong>前端代码：</strong></p>
+<div class="sourceCode" id="cb26"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="kw">const</span> topHotspots <span class="op">=</span> analysis<span class="op">?.</span><span class="at">rccp</span><span class="op">?.</span><span class="at">loading_table</span><span class="op">?.</span><span class="fu">slice</span>(<span class="dv">0</span><span class="op">,</span> <span class="dv">12</span>) <span class="op">||</span> []<span class="op">;</span></span></code></pre></div>
+<p><strong>排序规则：</strong> - 后端按 <code>loading_pct</code>
+降序排序 - 前端只显示前12条（最热的机台组）</p>
+<hr />
+<h2 id="瓶颈评分">3. 瓶颈评分</h2>
+<h3 id="loading-score">3.1 Loading Score</h3>
+<p><strong>定义：</strong> 基于利用率的瓶颈评分。</p>
+<p><strong>前端字段：</strong>
+<code>item.loading_pct</code>（同时用于显示和评分）</p>
+<p><strong>计算公式：</strong></p>
+<pre><code>loading_score = min(loading_pct, 100.0)</code></pre>
+<p><strong>评分映射：</strong></p>
+<pre><code>97.9% loading → 97.9分
+120% loading → 100分（上限）</code></pre>
+<hr />
+<h3 id="queue-score">3.2 Queue Score</h3>
+<p><strong>定义：</strong> 基于排队等待时间的瓶颈评分，反映Cycle
+Time恶化程度。</p>
+<p><strong>前端字段：</strong> <code>item.queue_score</code></p>
+<p><strong>计算公式：</strong></p>
+<h4 id="step-1-计算等待时间kingman公式">Step 1:
+计算等待时间（Kingman公式）</h4>
+<p><strong>单服务器（G/G/1）：</strong></p>
+<pre><code>Wq = (ρ/(1-ρ)) × ((Ca² + Cs²)/2) × (1/μ)</code></pre>
+<p><strong>多服务器（G/G/c）Sakasegawa近似：</strong></p>
+<pre><code>Wq = ρ^(√(2(c+1))) / (c × (1-ρ)) × ((Ca² + Cs²)/2) × (1/μ)</code></pre>
+<p><strong>变量说明：</strong> | 变量 | 含义 | 默认值 | |——|——|——–| | ρ
+| 利用率 | loading_pct/100 | | μ | 服务率(wph) | 1.0（可配置） | | c |
+设备数 | 1（可配置） | | Ca² | 到达CV² | 1.0（泊松到达） | | Cs² |
+服务CV² | 0.5（半导体典型值） |</p>
+<h4 id="step-2-映射评分">Step 2: 映射评分</h4>
+<div class="sourceCode" id="cb31"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> queue_score_from_wait(wait_hours):</span>
+<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> wait_hours <span class="op">&lt;</span> <span class="dv">1</span>:    <span class="cf">return</span> wait_hours × <span class="dv">20</span>        <span class="co"># 0-20分</span></span>
+<span id="cb31-3"><a href="#cb31-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">elif</span> wait_hours <span class="op">&lt;</span> <span class="dv">4</span>:  <span class="cf">return</span> <span class="dv">20</span> <span class="op">+</span> (wait<span class="op">-</span><span class="dv">1</span>) × <span class="dv">10</span>     <span class="co"># 20-50分</span></span>
+<span id="cb31-4"><a href="#cb31-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">elif</span> wait_hours <span class="op">&lt;</span> <span class="dv">12</span>: <span class="cf">return</span> <span class="dv">50</span> <span class="op">+</span> (wait<span class="op">-</span><span class="dv">4</span>) × <span class="fl">3.75</span>   <span class="co"># 50-80分</span></span>
+<span id="cb31-5"><a href="#cb31-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">else</span>:                 <span class="cf">return</span> <span class="bu">min</span>(<span class="dv">80</span><span class="op">+</span>(wait<span class="op">-</span><span class="dv">12</span>), <span class="dv">100</span>) <span class="co"># 80-100分</span></span></code></pre></div>
+<p><strong>示例：</strong></p>
+<pre><code>LITHO_01 Queue评分:
+输入参数:
+- loading = 97.9% → ρ = 0.979
+- service_rate = 50 wph → μ = 50
+- n_servers = 8台 → c = 8
+
+计算:
+power = √(2×(8+1)) = 4.24
+wait = 0.979^4.24 / (8×0.021) × 1.5/2 × 1/50
+     ≈ 0.08h
+
+评分:
+wait = 0.08h &lt; 1h → queue_score = 0.08 × 20 = 1.6分</code></pre>
+<p><strong>数据来源：</strong> | 参数 | 来源 | 说明 | |——|——|——| |
+loading_pct | RCCP计算 | 已有 | | service_rate | 配置传入 |
+默认1.0，可配置实际wph | | n_servers | 配置传入 |
+默认1，可配置实际设备数 |</p>
+<hr />
+<h3 id="expected-wait-hours">3.3 Expected Wait Hours</h3>
+<p><strong>定义：</strong> Kingman公式计算的平均排队等待时间。</p>
+<p><strong>前端字段：</strong> <code>item.expected_wait_hours</code></p>
+<p><strong>计算公式：</strong> 同Queue Score的Step 1</p>
+<p><strong>业务含义：</strong> - <code>wait &lt; 4h</code>: Cycle
+Time影响可控 - <code>wait 4-12h</code>: 需关注调度优化 -
+<code>wait &gt; 12h</code>: Cycle Time严重恶化</p>
+<hr />
+<h3 id="drift-score">3.4 Drift Score</h3>
+<p><strong>定义：</strong>
+基于历史利用率趋势的瓶颈评分，反映问题恶化速度。</p>
+<p><strong>前端字段：</strong> <code>item.drift_score</code></p>
+<p><strong>计算公式：</strong></p>
+<pre><code>drift_score = slope_score + acceleration_score</code></pre>
+<p><strong>计算过程：</strong></p>
+<h4 id="step-1-计算线性斜率">Step 1: 计算线性斜率</h4>
+<div class="sourceCode" id="cb34"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 历史loading序列: [88, 90, 92, 95, 97.9]</span></span>
+<span id="cb34-2"><a href="#cb34-2" aria-hidden="true" tabindex="-1"></a>x <span class="op">=</span> [<span class="dv">0</span>, <span class="dv">1</span>, <span class="dv">2</span>, <span class="dv">3</span>, <span class="dv">4</span>]  <span class="co"># 周序号</span></span>
+<span id="cb34-3"><a href="#cb34-3" aria-hidden="true" tabindex="-1"></a>slope <span class="op">=</span> polyfit(x, loading_history, <span class="dv">1</span>)[<span class="dv">0</span>]  <span class="co"># 线性回归斜率</span></span>
+<span id="cb34-4"><a href="#cb34-4" aria-hidden="true" tabindex="-1"></a><span class="co"># slope ≈ 2.5 pp/周</span></span></code></pre></div>
+<h4 id="step-2-计算加速度">Step 2: 计算加速度</h4>
+<div class="sourceCode" id="cb35"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 前半段斜率</span></span>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a>s1 <span class="op">=</span> polyfit([<span class="dv">0</span>,<span class="dv">1</span>,<span class="dv">2</span>], [<span class="dv">88</span>,<span class="dv">90</span>,<span class="dv">92</span>], <span class="dv">1</span>)[<span class="dv">0</span>] <span class="op">=</span> <span class="fl">2.0</span></span>
+<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb35-4"><a href="#cb35-4" aria-hidden="true" tabindex="-1"></a><span class="co"># 后半段斜率</span></span>
+<span id="cb35-5"><a href="#cb35-5" aria-hidden="true" tabindex="-1"></a>s2 <span class="op">=</span> polyfit([<span class="dv">0</span>,<span class="dv">1</span>,<span class="dv">2</span>], [<span class="dv">95</span>,<span class="fl">97.9</span>,?], <span class="dv">1</span>)[<span class="dv">0</span>] <span class="op">=</span> <span class="fl">3.0</span></span>
+<span id="cb35-6"><a href="#cb35-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb35-7"><a href="#cb35-7" aria-hidden="true" tabindex="-1"></a><span class="co"># 加速度</span></span>
+<span id="cb35-8"><a href="#cb35-8" aria-hidden="true" tabindex="-1"></a>accel <span class="op">=</span> s2 <span class="op">-</span> s1 <span class="op">=</span> <span class="fl">1.0</span> pp<span class="op">/</span>周²</span></code></pre></div>
+<h4 id="step-3-评分映射">Step 3: 评分映射</h4>
+<div class="sourceCode" id="cb36"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a>slope_score <span class="op">=</span> <span class="bu">min</span>(<span class="bu">max</span>(slope × <span class="dv">10</span>, <span class="dv">0</span>), <span class="dv">50</span>)   <span class="co"># 斜率评分</span></span>
+<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a>accel_score <span class="op">=</span> <span class="bu">min</span>(<span class="bu">max</span>(accel × <span class="dv">25</span>, <span class="dv">0</span>), <span class="dv">50</span>)   <span class="co"># 加速度评分</span></span>
+<span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a>drift_score <span class="op">=</span> slope_score <span class="op">+</span> accel_score</span></code></pre></div>
+<p><strong>示例：</strong></p>
+<pre><code>LITHO_01 Drift评分:
+历史4周: [88, 90, 92, 95] → 第5周97.9
+
+斜率: 2.5 pp/周 → slope_score = 2.5×10 = 25分
+加速度: 后半段加速 → accel_score = 12.5分
+drift_score = 25 + 12.5 = 37.5分</code></pre>
+<p><strong>数据来源：</strong> | 参数 | API | 字段 | |——|—–|——| |
+historical_loading | <code>/bottleneck/analyze</code>请求体 |
+<code>historical_loading</code> |</p>
+<hr />
+<h3 id="composite-score综合评分">3.5 Composite Score（综合评分）</h3>
+<p><strong>定义：</strong> 三维瓶颈综合评分，用于排名和预警。</p>
+<p><strong>前端字段：</strong> <code>item.composite_score</code></p>
+<p><strong>计算公式：</strong></p>
+<pre><code>composite_score = 0.5 × loading_score + 0.3 × queue_score + 0.2 × drift_score</code></pre>
+<p><strong>示例：</strong></p>
+<pre><code>LITHO_01 综合评分:
+loading_score = 97.9
+queue_score = 1.6
+drift_score = 37.5
+
+composite = 0.5×97.9 + 0.3×1.6 + 0.2×37.5
+          = 48.95 + 0.48 + 7.5
+          = 56.93分</code></pre>
+<hr />
+<h3 id="rank排名">3.6 Rank（排名）</h3>
+<p><strong>定义：</strong> 按综合评分排序后的名次。</p>
+<p><strong>前端字段：</strong> <code>item.rank</code></p>
+<p><strong>排序逻辑：</strong></p>
+<div class="sourceCode" id="cb40"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb40-1"><a href="#cb40-1" aria-hidden="true" tabindex="-1"></a>bottlenecks.sort(key<span class="op">=</span>composite_score, reverse<span class="op">=</span><span class="va">True</span>)</span>
+<span id="cb40-2"><a href="#cb40-2" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> i, b <span class="kw">in</span> <span class="bu">enumerate</span>(bottlenecks, <span class="dv">1</span>):</span>
+<span id="cb40-3"><a href="#cb40-3" aria-hidden="true" tabindex="-1"></a>    b.rank <span class="op">=</span> i</span></code></pre></div>
+<hr />
+<h3 id="severity严重程度">3.7 Severity（严重程度）</h3>
+<p><strong>定义：</strong> 瓶颈严重等级分类。</p>
+<p><strong>前端字段：</strong> <code>item.severity</code></p>
+<p><strong>分类阈值：</strong></p>
+<div class="sourceCode" id="cb41"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> severity_from_score(score):</span>
+<span id="cb41-2"><a href="#cb41-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> score <span class="op">&gt;=</span> <span class="dv">80</span>: <span class="cf">return</span> <span class="st">&quot;critical&quot;</span>   <span class="co"># 严重瓶颈</span></span>
+<span id="cb41-3"><a href="#cb41-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">elif</span> score <span class="op">&gt;=</span> <span class="dv">60</span>: <span class="cf">return</span> <span class="st">&quot;severe&quot;</span>    <span class="co"># 较严重</span></span>
+<span id="cb41-4"><a href="#cb41-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">elif</span> score <span class="op">&gt;=</span> <span class="dv">40</span>: <span class="cf">return</span> <span class="st">&quot;moderate&quot;</span>  <span class="co"># 中等</span></span>
+<span id="cb41-5"><a href="#cb41-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">else</span>: <span class="cf">return</span> <span class="st">&quot;minor&quot;</span>                 <span class="co"># 轻微</span></span></code></pre></div>
+<hr />
+<h2 id="lp-优化器">4. LP 优化器</h2>
+<h3 id="status">4.1 Status</h3>
+<p><strong>定义：</strong> LP求解器返回状态。</p>
+<p><strong>前端字段：</strong> <code>analysis.lp.status</code></p>
+<p><strong>状态类型：</strong> | 状态 | 含义 | 说明 | |——|——|——| |
+optimal | 最优解找到 | 成功求解 | | infeasible | 问题不可行 |
+无满足约束的解 | | timeout | 超时 | 未在时限内求解 | | heuristic |
+启发式解 | CBC失败，用贪心算法 | | error | 求解错误 | solver异常 |</p>
+<hr />
+<h3 id="objective-value目标值">4.2 Objective Value（目标值）</h3>
+<p><strong>定义：</strong> LP目标函数值（最大化利润时的总利润）。</p>
+<p><strong>前端字段：</strong>
+<code>analysis.lp.objective_value</code></p>
+<p><strong>计算公式：</strong></p>
+<pre><code>objective_value = Σ(unit_profit[product] × optimal_plan[product])</code></pre>
+<p><strong>示例：</strong></p>
+<pre><code>目标值计算:
+- 28nm_DRAM_A: 200片 × ¥150/片 = ¥30,000
+- 64L_NAND_B: 0片 × ¥80/片 = ¥0
+- 目标值 = ¥30,000</code></pre>
+<hr />
+<h3 id="optimal-plan最优产量分配">4.3 Optimal Plan（最优产量分配）</h3>
+<p><strong>定义：</strong> LP求解的最优产品产量分配。</p>
+<p><strong>前端字段：</strong> <code>analysis.lp.optimal_plan</code></p>
+<p><strong>计算逻辑：</strong></p>
+<pre><code>LP模型:
+max Σ profit[i] × x[i]
+
+约束:
+Σ TC[i,j] × x[i] ≤ H[j]  ∀j  (产能约束)
+x[i] ≥ demand_min[i]        (合同最低)
+x[i] ≤ demand_max[i]        (市场上限)
+x[i] ≥ 0</code></pre>
+<p><strong>求解器：</strong> CBC (COIN-OR Branch and Cut)</p>
+<hr />
+<h3 id="capacity-utilization">4.4 Capacity Utilization</h3>
+<p><strong>定义：</strong> LP最优解下各机台组的利用率。</p>
+<p><strong>前端字段：</strong>
+<code>analysis.lp.capacity_utilization</code></p>
+<p><strong>计算公式：</strong></p>
+<pre><code>utilization[tg] = Σ(TC[product][tg] × optimal_plan[product]) / available_hours[tg] × 100%</code></pre>
+<hr />
+<h3 id="binding-constraints">4.5 Binding Constraints</h3>
+<p><strong>定义：</strong> 达到产能上限的机台组（紧约束）。</p>
+<p><strong>前端字段：</strong>
+<code>analysis.lp.binding_constraints</code></p>
+<p><strong>判断逻辑：</strong></p>
+<div class="sourceCode" id="cb46"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a>binding <span class="op">=</span> []</span>
+<span id="cb46-2"><a href="#cb46-2" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> tg <span class="kw">in</span> tool_groups:</span>
+<span id="cb46-3"><a href="#cb46-3" aria-hidden="true" tabindex="-1"></a>    utilization <span class="op">=</span> capacity_utilization[tg]</span>
+<span id="cb46-4"><a href="#cb46-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> utilization <span class="op">&gt;=</span> <span class="fl">99.5</span><span class="op">%</span>:</span>
+<span id="cb46-5"><a href="#cb46-5" aria-hidden="true" tabindex="-1"></a>        binding.append(tg)  <span class="co"># 利用率接近100% → 紧约束</span></span></code></pre></div>
+<hr />
+<h2 id="des-仿真">5. DES 仿真</h2>
+<h3 id="feasible">5.1 Feasible</h3>
+<p><strong>定义：</strong> DES仿真可行性判断。</p>
+<p><strong>前端字段：</strong> <code>analysis.des.feasible</code></p>
+<p><strong>判断逻辑：</strong></p>
+<div class="sourceCode" id="cb47"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb47-1"><a href="#cb47-1" aria-hidden="true" tabindex="-1"></a>feasible <span class="op">=</span> avg_wait_time <span class="op">&lt;</span> threshold_hours  <span class="co"># 阈值通常24h</span></span></code></pre></div>
+<hr />
+<h3 id="average-wait-time">5.2 Average Wait Time</h3>
+<p><strong>定义：</strong> 仿真平均排队等待时间。</p>
+<p><strong>前端字段：</strong>
+<code>analysis.des.avg_wait_hours</code></p>
+<p><strong>计算方式：</strong> DES仿真引擎运行后统计</p>
+<hr />
+<h3 id="p95-wait-time">5.3 P95 Wait Time</h3>
+<p><strong>定义：</strong> 仿真中95%的Lot等待时间上限。</p>
+<p><strong>前端字段：</strong>
+<code>analysis.des.p95_wait_hours</code></p>
+<p><strong>业务含义：</strong> 用于评估Cycle Time波动范围</p>
+<hr />
+<h2 id="生产计划">6. 生产计划</h2>
+<h3 id="feasible-1">6.1 Feasible</h3>
+<p><strong>定义：</strong> 综合RCCP+LP+DES后的整体可行性。</p>
+<p><strong>前端字段：</strong> <code>productionPlan.feasible</code></p>
+<p><strong>判断逻辑：</strong></p>
+<div class="sourceCode" id="cb48"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb48-1"><a href="#cb48-1" aria-hidden="true" tabindex="-1"></a>feasible <span class="op">=</span> (RCCP.feasible <span class="kw">or</span> LP.feasible) <span class="kw">and</span> DES.feasible</span></code></pre></div>
+<hr />
+<h3 id="production-plan生产量分配">6.2 Production
+Plan（生产量分配）</h3>
+<p><strong>定义：</strong> 最终推荐的生产量分配。</p>
+<p><strong>前端字段：</strong>
+<code>productionPlan.production_plan</code></p>
+<p><strong>来源：</strong> - 若RCCP可行 → 使用原demand_plan -
+若RCCP不可行且LP可行 → 使用LP.optimal_plan - 若LP调整 →
+显示调整后的计划</p>
+<hr />
+<h3 id="recommendations建议措施">6.3 Recommendations（建议措施）</h3>
+<p><strong>定义：</strong> 针对瓶颈和产能缺口的具体建议。</p>
+<p><strong>前端字段：</strong>
+<code>productionPlan.recommendations</code></p>
+<p><strong>生成逻辑：</strong></p>
+<div class="sourceCode" id="cb49"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb49-1"><a href="#cb49-1" aria-hidden="true" tabindex="-1"></a>recommendations <span class="op">=</span> []</span>
+<span id="cb49-2"><a href="#cb49-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb49-3"><a href="#cb49-3" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> tg <span class="kw">in</span> bottleneck_groups:</span>
+<span id="cb49-4"><a href="#cb49-4" aria-hidden="true" tabindex="-1"></a>    recommendations.append(<span class="ss">f&quot;增加</span><span class="sc">{</span>tg<span class="sc">}</span><span class="ss">产能或削减需求&quot;</span>)</span>
+<span id="cb49-5"><a href="#cb49-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb49-6"><a href="#cb49-6" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> gap <span class="op">&gt;</span> <span class="dv">0</span>:</span>
+<span id="cb49-7"><a href="#cb49-7" aria-hidden="true" tabindex="-1"></a>    recommendations.append(<span class="ss">f&quot;产能缺口</span><span class="sc">{</span>gap<span class="sc">}</span><span class="ss">h，需增加设备&quot;</span>)</span>
+<span id="cb49-8"><a href="#cb49-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb49-9"><a href="#cb49-9" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> LP_adjusted:</span>
+<span id="cb49-10"><a href="#cb49-10" aria-hidden="true" tabindex="-1"></a>    recommendations.append(<span class="st">&quot;LP优化已调整产品mix&quot;</span>)</span></code></pre></div>
+<hr />
+<h2 id="output-视角">7. Output 视角</h2>
+<h3 id="output-target-week产出目标周">7.1 Output Target
+Week（产出目标周）</h3>
+<p><strong>定义：</strong> 规划产出的目标周。</p>
+<p><strong>前端字段：</strong>
+<code>outputConfig.outputTargetWeek</code></p>
+<p><strong>数据来源：</strong> - 用户输入或 -
+<code>datasetSummary.time_windows[0]</code></p>
+<hr />
+<h3 id="output-targets产出目标">7.2 Output Targets（产出目标）</h3>
+<p><strong>定义：</strong> 各产品本周的产出目标量。</p>
+<p><strong>前端字段：</strong>
+<code>outputConfig.outputTargets</code></p>
+<p><strong>计算逻辑：</strong></p>
+<div class="sourceCode" id="cb50"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb50-1"><a href="#cb50-1" aria-hidden="true" tabindex="-1"></a>targets[product] <span class="op">=</span> <span class="bu">Math</span><span class="op">.</span><span class="fu">round</span>(demand_plan[product] × <span class="fl">0.8</span>)  <span class="co">// 默认80%</span></span></code></pre></div>
+<p><strong>数据来源：</strong> | 参数 | API | 字段 | |——|—–|——| |
+demand_plan | <code>/data/demand_plan</code> | <code>demand_plan</code>
+|</p>
+<hr />
+<h3 id="wip-lot-data">7.3 WIP Lot Data</h3>
+<p><strong>定义：</strong> 当前在制Lot明细数据。</p>
+<p><strong>前端字段：</strong> <code>wipData</code></p>
+<p><strong>必需字段：</strong> | 字段 | 含义 | 示例 | |——|——|——| |
+lot_id | Lot编号 | LOT001 | | product_id | 产品ID | 28nm_DRAM_A | |
+current_step_seq | 当前工序序号 | 60 | | wafer_count | 晶圆数 | 25 | |
+percent_complete | 完成度% | 85 |</p>
+<p><strong>工序序号计算：</strong></p>
+<div class="sourceCode" id="cb51"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb51-1"><a href="#cb51-1" aria-hidden="true" tabindex="-1"></a>stepsPerProduct <span class="op">=</span> <span class="bu">Math</span><span class="op">.</span><span class="fu">round</span>(n_routes <span class="op">/</span> n_products)  <span class="co">// 约70步</span></span>
+<span id="cb51-2"><a href="#cb51-2" aria-hidden="true" tabindex="-1"></a>current_step_seq <span class="op">=</span> <span class="bu">Math</span><span class="op">.</span><span class="fu">floor</span>(stepsPerProduct × stepPct)</span>
+<span id="cb51-3"><a href="#cb51-3" aria-hidden="true" tabindex="-1"></a><span class="co">// 85%完成度 → current_step = 70 × 0.85 = 59</span></span></code></pre></div>
+<hr />
+<h3 id="total-predicted-output总预测产出">7.4 Total Predicted
+Output（总预测产出）</h3>
+<p><strong>定义：</strong> WIP可贡献的本周总产出量。</p>
+<p><strong>前端字段：</strong>
+<code>outputResult.total_predicted_output</code></p>
+<p><strong>计算逻辑：</strong></p>
+<div class="sourceCode" id="cb52"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a>predicted_output <span class="op">=</span> Σ(near_complete_lots.wafer_count)</span>
+<span id="cb52-2"><a href="#cb52-2" aria-hidden="true" tabindex="-1"></a><span class="co"># near_complete: percent_complete &gt;= threshold(80%)</span></span></code></pre></div>
+<hr />
+<h3 id="output-gap产出缺口">7.5 Output Gap（产出缺口）</h3>
+<p><strong>定义：</strong> 产出目标与WIP预测的差值。</p>
+<p><strong>前端字段：</strong> <code>outputResult.output_gap</code></p>
+<p><strong>计算公式：</strong></p>
+<pre><code>output_gap[product] = output_target[product] - predicted_output[product]</code></pre>
+<hr />
+<h3 id="overall-wip-sharewip占比">7.6 Overall WIP Share（WIP占比）</h3>
+<p><strong>定义：</strong> WIP后续工序小时占总需求小时的百分比。</p>
+<p><strong>前端字段：</strong>
+<code>outputResult.overall_wip_share_pct</code></p>
+<p><strong>计算公式：</strong></p>
+<pre><code>overall_wip_share = Σ(WIP后续工序小时) / Σ(总需求小时) × 100%</code></pre>
+<p><strong>示例：</strong></p>
+<pre><code>若只有WIP（无新投入）:
+WIP后续工序小时 = 总需求小时
+overall_wip_share = 100%</code></pre>
+<hr />
+<h3 id="capacity-demand-breakdown">7.7 Capacity Demand Breakdown</h3>
+<p><strong>定义：</strong> 各机台组的产能需求分解。</p>
+<p><strong>前端字段：</strong>
+<code>outputResult.capacity_demand</code></p>
+<p><strong>字段说明：</strong> | 字段 | 含义 | 计算公式 | |——|——|———-| |
+wip_remaining_hours | WIP后续工序小时 | Σ后续工序TC × wafers | |
+new_input_hours | 新投入小时 | 新投入 × 本周工序TC | |
+total_demand_hours | 总需求 | wip + new_input | | loading_pct | 利用率 |
+demand / available × 100 | | wip_share_pct | WIP占比 | wip / total × 100
+|</p>
+<hr />
+<h3 id="input-recommendations投入建议">7.8 Input
+Recommendations（投入建议）</h3>
+<p><strong>定义：</strong> 为满足产出目标需要的新投入量。</p>
+<p><strong>前端字段：</strong>
+<code>outputResult.input_recommendations</code></p>
+<p><strong>计算公式：</strong></p>
+<pre><code>input_recommendation[product] = output_gap[product]
+# 建议投入量 = 产出缺口</code></pre>
+<hr />
+<h3 id="completion-rate完成度">7.9 Completion Rate（完成度）</h3>
+<p><strong>定义：</strong> 预测产出占目标的比例。</p>
+<p><strong>前端计算：</strong></p>
+<div class="sourceCode" id="cb57"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb57-1"><a href="#cb57-1" aria-hidden="true" tabindex="-1"></a>completion_rate <span class="op">=</span> total_predicted_output <span class="op">/</span> <span class="fu">Σ</span>(outputTargets) × <span class="dv">100</span><span class="op">%</span></span></code></pre></div>
+<hr />
+<h2 id="what-if-分析">8. What-if 分析</h2>
+<h3 id="扰动类型">8.1 扰动类型</h3>
+<p><strong>定义：</strong> 模拟的异常场景类型。</p>
+<p><strong>前端字段：</strong>
+<code>whatIfConfig.perturbationType</code></p>
+<p><strong>类型说明：</strong> | 类型 | 参数 | 含义 | |——|——|——| |
+tool_down | tool_group_id, hours_lost | 机台停机 | | demand_change |
+product_id, delta_wafers | 需求变化 | | path_switch | product_id,
+new_path_id | 路径切换 |</p>
+<hr />
+<h3 id="delta-loading">8.2 Delta Loading</h3>
+<p><strong>定义：</strong> 扰动后利用率变化量。</p>
+<p><strong>前端字段：</strong> <code>diff_table[].delta_pp</code></p>
+<p><strong>计算公式：</strong></p>
+<pre><code>delta_loading = scenario_loading - baseline_loading</code></pre>
+<hr />
+<h3 id="status-change">8.3 Status Change</h3>
+<p><strong>定义：</strong> 状态是否发生变化。</p>
+<p><strong>判断逻辑：</strong></p>
+<div class="sourceCode" id="cb59"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb59-1"><a href="#cb59-1" aria-hidden="true" tabindex="-1"></a>status_change <span class="op">=</span> (baseline_status <span class="op">!=</span> scenario_status)</span></code></pre></div>
+<hr />
+<h2 id="情景分类">9. 情景分类</h2>
+<h3 id="scenario-type">9.1 Scenario Type</h3>
+<p><strong>定义：</strong> 根据制程路线复杂度判断的情景类型。</p>
+<p><strong>前端字段：</strong>
+<code>scenarioInfo.scenario_type</code></p>
+<p><strong>分类逻辑：</strong></p>
+<pre><code>情景1: 单路径、单一制程、无backup
+情景2: 多路径（同一产品多条工艺路线）
+情景3: 复杂制程、多backup机台
+情景4: 全适制程（任意机台可做任意工序）</code></pre>
+<hr />
+<h3 id="algorithm推荐算法">9.2 Algorithm（推荐算法）</h3>
+<p><strong>定义：</strong> 该情景推荐的求解算法。</p>
+<p><strong>前端字段：</strong> <code>scenarioInfo.algorithm</code></p>
+<p><strong>推荐逻辑：</strong> | 情景 | 推荐算法 | |——|———-| | 情景1 |
+标准产能公式 | | 情景2 | 路径mix优化 | | 情景3 | 分配优化（LP+启发式） |
+| 情景4 | 全适制程简化计算 |</p>
+<hr />
+<h3 id="recommended-solver">9.3 Recommended Solver</h3>
+<p><strong>定义：</strong> 推荐的求解器。</p>
+<p><strong>前端字段：</strong>
+<code>scenarioInfo.recommended_solver</code></p>
+<p><strong>选项：</strong> CBC, GLPK, 启发式</p>
+<hr />
+<h2 id="附录a参数速查表">附录A：参数速查表</h2>
+<h3 id="运行概览-1">运行概览</h3>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>字段</th>
+<th>公式</th>
+<th>来源</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>整体Loading</td>
+<td><code>rccp.overall_loading_pct</code></td>
+<td>Σdemand/Σavail×100</td>
+<td>RCCP</td>
+</tr>
+<tr>
+<td>可行性</td>
+<td><code>rccp.feasible</code></td>
+<td>无overload机台</td>
+<td>RCCP</td>
+</tr>
+<tr>
+<td>主瓶颈</td>
+<td><code>bottleneck.primary_bottleneck</code></td>
+<td>综合评分最高</td>
+<td>Bottleneck</td>
+</tr>
+<tr>
+<td>DES结论</td>
+<td><code>des.feasible</code></td>
+<td>wait&lt;threshold</td>
+<td>DES</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rccp热点">RCCP热点</h3>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>字段</th>
+<th>公式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Demand</td>
+<td><code>demand_hours</code></td>
+<td>Σ(产量×TC)</td>
+</tr>
+<tr>
+<td>Available</td>
+<td><code>available_hours</code></td>
+<td>n×168×OEE</td>
+</tr>
+<tr>
+<td>Loading</td>
+<td><code>loading_pct</code></td>
+<td>demand/avail×100</td>
+</tr>
+<tr>
+<td>Gap</td>
+<td><code>gap_hours</code></td>
+<td>demand-avail</td>
+</tr>
+<tr>
+<td>Status</td>
+<td><code>status</code></td>
+<td>classify(loading)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="瓶颈评分-1">瓶颈评分</h3>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>字段</th>
+<th>公式</th>
+<th>权重</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Loading分</td>
+<td><code>loading_pct</code></td>
+<td>min(loading,100)</td>
+<td>50%</td>
+</tr>
+<tr>
+<td>Queue分</td>
+<td><code>queue_score</code></td>
+<td>Kingman→映射</td>
+<td>30%</td>
+</tr>
+<tr>
+<td>Drift分</td>
+<td><code>drift_score</code></td>
+<td>斜率+加速度</td>
+<td>20%</td>
+</tr>
+<tr>
+<td>综合分</td>
+<td><code>composite_score</code></td>
+<td>加权求和</td>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+<h3 id="lp优化">LP优化</h3>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>字段</th>
+<th>公式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>目标值</td>
+<td><code>objective_value</code></td>
+<td>Σ(profit×qty)</td>
+</tr>
+<tr>
+<td>最优计划</td>
+<td><code>optimal_plan</code></td>
+<td>LP求解</td>
+</tr>
+<tr>
+<td>紧约束</td>
+<td><code>binding_constraints</code></td>
+<td>utilization≥99.5%</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="附录b公式汇总">附录B：公式汇总</h2>
+<h3 id="kingman等待时间">Kingman等待时间</h3>
+<pre><code>Wq = ρ^(√(2(c+1))) / (c×(1-ρ)) × ((Ca²+Cs²)/2) × (1/μ)</code></pre>
+<h3 id="整体loading">整体Loading</h3>
+<pre><code>overall_loading = Σ(demand_hours) / Σ(available_hours) × 100%</code></pre>
+<h3 id="瓶颈综合评分">瓶颈综合评分</h3>
+<pre><code>composite = 0.5×loading + 0.3×queue + 0.2×drift</code></pre>
+<h3 id="产出缺口">产出缺口</h3>
+<pre><code>output_gap = output_target - predicted_output</code></pre>
+<h3 id="工序级剩余工时">工序级剩余工时</h3>
+<pre><code>remaining_hours = Σ(后续工序run_time × wafers)</code></pre>
+<hr />
+<p><em>文档版本：1.0 | 最后更新：2026-04-29</em></p>
+</body>
+</html>

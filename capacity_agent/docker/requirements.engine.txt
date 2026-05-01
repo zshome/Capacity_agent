@@ -1,0 +1,23 @@
+# Engine service dependencies
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pydantic==2.9.2
+pandas==2.2.3
+numpy==2.1.2
+openpyxl==3.1.5
+pyarrow==17.0.0
+
+# LP solver
+pyomo==6.8.2
+
+# DES
+simpy==4.1.1
+
+# Database
+psycopg2-binary==2.9.10
+sqlalchemy==2.0.36
+clickhouse-driver==0.2.9
+python-multipart==0.0.12
+
+# Logging
+python-json-logger==2.0.7

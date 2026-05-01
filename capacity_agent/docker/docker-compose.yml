@@ -1,0 +1,180 @@
+# =================================================================
+# Capacity Agent - Docker Compose
+# =================================================================
+# 一键启动所有服务 (本地数据不出厂)
+#
+# 硬件要求 (跑 Qwen2.5-32B):
+#   - GPU: 1× A100 80G  或  2× RTX A6000 48G  或  2× L40 48G
+#   - CPU: 16 核
+#   - RAM: 64GB
+#   - 磁盘: 200GB SSD (含模型权重 ~65GB)
+#
+# 最低 (跑 Qwen2.5-7B):
+#   - GPU: 1× RTX 4090 24G
+#   - RAM: 32GB
+# =================================================================
+
+services:
+  # ---------------------------------------------------------------
+  # L1 Data Layer
+  # ---------------------------------------------------------------
+  postgres:
+    image: postgres:16
+    container_name: cap_postgres
+    environment:
+      POSTGRES_USER: capacity
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-capacity_dev}
+      POSTGRES_DB: capacity_db
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ../data/schemas:/init:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U capacity -d capacity_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: cap_clickhouse
+    environment:
+      CLICKHOUSE_USER: capacity
+      CLICKHOUSE_PASSWORD: ${CH_PASSWORD:-capacity_dev}
+      CLICKHOUSE_DB: capacity_olap
+    volumes:
+      - ch_data:/var/lib/clickhouse
+    ports:
+      - "8123:8123"     # HTTP
+      - "9000:9000"     # native
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------
+  # L2 Compute Engines
+  # ---------------------------------------------------------------
+  engine:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.engine
+    container_name: cap_engine
+    environment:
+      PG_HOST: postgres
+      PG_USER: capacity
+      PG_PASSWORD: ${PG_PASSWORD:-capacity_dev}
+      PG_DB: capacity_db
+      CH_HOST: clickhouse
+      CH_USER: capacity
+      CH_PASSWORD: ${CH_PASSWORD:-capacity_dev}
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------
+  # LLM (vLLM) - 本地推理,数据不出厂
+  # ---------------------------------------------------------------
+  vllm:
+    image: vllm/vllm-openai:v0.6.3
+    container_name: cap_vllm
+    runtime: nvidia                          # 需要 nvidia-container-toolkit
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      HF_HOME: /models
+      HF_HUB_OFFLINE: "1"                    # 离线模式,不联网下载
+    volumes:
+      - vllm_models:/models                  # 模型缓存 (首次启动需在线下载,之后离线)
+    ports:
+      - "8002:8000"
+    command: >
+      --model Qwen/Qwen2.5-32B-Instruct
+      --host 0.0.0.0
+      --port 8000
+      --tensor-parallel-size 2
+      --max-model-len 32768
+      --enable-auto-tool-choice
+      --tool-call-parser hermes
+      --gpu-memory-utilization 0.92
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 300s                     # 大模型加载慢
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------
+  # L3 Agent
+  # ---------------------------------------------------------------
+  agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.app
+    container_name: cap_agent
+    environment:
+      VLLM_BASE_URL: http://vllm:8000/v1
+      LLM_MODEL: Qwen/Qwen2.5-32B-Instruct
+      ENGINE_BASE_URL: http://engine:8001
+      DATA_BASE_URL: http://engine:8001
+      PG_HOST: postgres
+    ports:
+      - "8000:8000"
+    depends_on:
+      engine:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------
+  # 监控 (可选)
+  # ---------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: cap_prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom_data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: cap_grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+
+volumes:
+  pg_data:
+  ch_data:
+  vllm_models:
+  prom_data:
+  grafana_data:

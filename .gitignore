@@ -1,0 +1,25 @@
+.DS_Store
+
+# Python cache and virtual environments
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+.venv/
+**/.venv/
+venv/
+**/venv/
+.demo-lite/
+.demo-venv/
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+*.bak
+
+# Local logs and temp files
+*.log
+*.tmp
+*.temp

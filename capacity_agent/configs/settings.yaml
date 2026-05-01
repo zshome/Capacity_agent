@@ -1,0 +1,38 @@
+# Capacity Agent 全局配置
+
+# 状态阈值
+thresholds:
+  loading_healthy_max: 75.0      # < 75% 健康
+  loading_warning_max: 85.0      # 75-85% 关注
+  loading_critical_max: 100.0    # 85-100% 瓶颈
+  # > 100% 过载
+
+# 瓶颈识别权重
+bottleneck_weights:
+  loading: 0.5
+  queue: 0.3
+  drift: 0.2
+
+# Kingman 默认 CV
+default_cv:
+  arrival: 1.0      # Poisson 假设
+  service: 0.5      # 半导体服务 CV 典型值
+
+# Agent 限流
+agent:
+  max_tool_iterations: 8
+  llm_temperature: 0.1
+  llm_max_tokens: 2048
+  llm_timeout_seconds: 120
+  des_max_runtime_minutes: 5
+
+# 数据刷新频率
+refresh:
+  capacity_matrix_hours: 24       # dbt 每天刷新
+  oee_minutes: 15                 # 每 15 分钟从 MES 拉取
+  demand_plan_hours: 4            # 每 4 小时同步 MPS
+
+# 数据完整性阈值 (低于此则降级置信度)
+data_quality:
+  oee_completeness_min: 0.95
+  route_master_freshness_days: 7

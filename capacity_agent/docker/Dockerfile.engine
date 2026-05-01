@@ -1,0 +1,31 @@
+# =================================================================
+# Engine Service (L2): RCCP, Bottleneck, LP, DES, What-if
+# =================================================================
+FROM python:3.11-slim AS base
+
+# 系统依赖: CBC LP solver, postgres client, build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    coinor-cbc \
+    coinor-libcbc-dev \
+    libpq-dev \
+    gcc \
+    g++ \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 拷贝 requirements
+COPY docker/requirements.engine.txt /app/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# 拷贝代码
+COPY engines/ /app/engines/
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8001
+
+CMD ["uvicorn", "engines.server:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "2"]
