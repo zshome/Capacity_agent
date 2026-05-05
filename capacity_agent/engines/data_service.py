@@ -44,6 +44,8 @@ REQUIRED_SHEETS = {
         "time_window",
         "product_id",
         "wafer_count",
+        "plan_version",
+        "release_status",
     },
     "wip_lot_detail": {
         "lot_id",
@@ -51,6 +53,7 @@ REQUIRED_SHEETS = {
         "current_step_seq",
         "wafer_count",
         "percent_complete",
+        "lot_status",
     },
 }
 
@@ -145,6 +148,10 @@ class DatasetRegistry:
             wip_lot_detail["good_wafer_count"] = pd.to_numeric(wip_lot_detail["good_wafer_count"], errors="coerce").fillna(0.0)
         if "wait_hours_so_far" in wip_lot_detail.columns:
             wip_lot_detail["wait_hours_so_far"] = pd.to_numeric(wip_lot_detail["wait_hours_so_far"], errors="coerce").fillna(0.0)
+        if "remaining_wait_hours" in wip_lot_detail.columns:
+            wip_lot_detail["remaining_wait_hours"] = pd.to_numeric(wip_lot_detail["remaining_wait_hours"], errors="coerce").fillna(0.0)
+        if "hold_release_date" in wip_lot_detail.columns:
+            wip_lot_detail["hold_release_date"] = pd.to_datetime(wip_lot_detail["hold_release_date"], errors="coerce")
 
         product_ids = sorted(set(routes["product_id"].astype(str)) | set(demand["product_id"].astype(str)))
         products = pd.DataFrame(
@@ -416,6 +423,9 @@ def generate_excel_template() -> bytes:
         "market_max": [1500, 1200, 800, 1500, 1200, 800],
         "unit_profit": [150.0, 80.0, 120.0, 150.0, 80.0, 120.0],
         "plan_version": ["v1.0", "v1.0", "v1.0", "v1.0", "v1.0", "v1.0"],
+        "release_status": ["frozen", "frozen", "frozen", "draft", "draft", "draft"],
+        "owner": ["MPS", "MPS", "MPS", "MPS", "MPS", "MPS"],
+        "approved_at": ["2026-04-25", "2026-04-25", "2026-04-25", "", "", ""],
     }
     demand_plan_df = pd.DataFrame(demand_plan_data)
 
@@ -430,6 +440,8 @@ def generate_excel_template() -> bytes:
         "lot_status": ["WAIT", "RUN", "WAIT", "MOVE"],
         "good_wafer_count": [24, 25, 24, 25],
         "wait_hours_so_far": [12.0, 4.5, 26.0, 1.0],
+        "remaining_wait_hours": [0.0, 0.0, 12.0, 0.0],
+        "hold_release_date": ["", "", "", ""],
         "input_week": ["2026-W05", "2026-W06", "2026-W04", "2026-W05"],
     }
     wip_lot_detail_df = pd.DataFrame(wip_lot_detail_data)

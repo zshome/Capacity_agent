@@ -15,6 +15,21 @@ function severityClass(status) {
   return "ok";
 }
 
+function isR6Window(value) {
+  const text = String(value || "").toLowerCase();
+  return text.includes("r6") || (!text.includes("-w") && /^\d{4}[-_/]\d{1,2}$/.test(text.replace("r6-", "")));
+}
+
+function readinessView(value) {
+  const map = {
+    commit_ready_optimal: { label: "可冻结", tone: "ok", hint: "最优求解已验证，可用于R6承诺" },
+    commit_ready_no_adjustment: { label: "可承诺", tone: "ok", hint: "原计划可行，无需优化调整" },
+    solver_required_for_final_commit: { label: "待求解器确认", tone: "warn", hint: "当前为启发式结果，冻结前需最优求解验证" },
+    not_commit_ready: { label: "不可冻结", tone: "danger", hint: "计划仍超产能或约束不可满足" }
+  };
+  return map[value] || { label: "待分析", tone: "neutral", hint: "运行生产计划后生成冻结状态" };
+}
+
 function StatusPill({ label, tone }) {
   return <span className={`pill ${tone}`}>{label}</span>;
 }
@@ -232,7 +247,7 @@ function App() {
       setError("");
       
       const [statusResponse, demandResponse, matrixResponse] = await Promise.all([
-        api.toolGroupStatus(datasetId),
+        api.toolGroupStatus(datasetId, timeWindow),
         api.demandPlan(datasetId, timeWindow),
         api.capacityMatrix(datasetId)
       ]);
@@ -294,6 +309,9 @@ function App() {
           tool_groups: Object.keys(availableHours),
           capacity_matrix: capacityMatrix,
           available_hours: availableHours,
+          dataset_id: datasetId,
+          wip_lot_detail: wipData,
+          enable_wip_adjustment: wipData.length > 0,
           // 使用空 demand_min，让 LP 自动决定最优分配
           // contract_min 可能导致产能约束无法满足
           demand_min: {},
@@ -302,7 +320,8 @@ function App() {
           unit_profit: Object.fromEntries((demandResponse.records || []).map((row) => [row.product_id, row.unit_profit || 1])),
           objective: lpConfig.objective,
           solver: lpConfig.solver,
-          time_limit_seconds: lpConfig.timeLimit
+          time_limit_seconds: lpConfig.timeLimit,
+          time_window: timeWindow
         });
       }
 
@@ -395,8 +414,8 @@ function App() {
         const planResult = await api.generateProductionPlanFromDataset({
           dataset_id: datasetId,
           time_window: timeWindow,
-          wip_lot_detail: outputActive ? wipData : [],
-          enable_wip_adjustment: outputActive && wipData.length > 0,
+          wip_lot_detail: wipData,
+          enable_wip_adjustment: wipData.length > 0,
           demand_min: demandMin,
           demand_max: demandMax,
           lp_enabled: lpConfig.enabled,
@@ -477,6 +496,11 @@ function App() {
   const productOptions = analysis?.demandResponse?.records || [];
   const toolOptions = analysis?.statusResponse?.tool_groups || [];
   const totalOutputTarget = Object.values(outputConfig.outputTargets || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+  const selectedDemandRecords = analysis?.demandResponse?.records || [];
+  const r6DemandTotal = selectedDemandRecords.reduce((sum, row) => sum + Number(row.wafer_count || 0), 0);
+  const r6PlanMode = isR6Window(timeWindow);
+  const readiness = readinessView(productionPlan?.metadata?.decision_readiness);
+  const commitFeasible = Boolean(productionPlan?.metadata?.commit_feasible ?? productionPlan?.feasible);
   const tabItems = [
     { id: "overview", label: "总览", hint: "RCCP、瓶颈、LP、DES" },
     { id: "planning", label: "生产计划", hint: "LP配置与WIP校正" },
@@ -538,7 +562,7 @@ function App() {
             <label className="upload-drop">
               <input type="file" accept=".xlsx,.xls" onChange={handleUpload} />
               <strong>{uploading ? "导入中..." : "导入 Excel 工作簿（5 个必填 Sheet）"}</strong>
-              <span>需包含 `route_master`、`tool_groups`、`oee`、`demand_plan`、`wip_lot_detail`，其中 `wip_lot_detail` 为 WIP 必填 sheet</span>
+              <span>需包含 `route_master`、`tool_groups`、`oee`、`demand_plan`、`wip_lot_detail`。`demand_plan` 需带 R6 版本/发布状态，`wip_lot_detail` 需带 Lot 状态用于 WIP 分摊。</span>
             </label>
             <div className="control-actions-group">
               <button className="secondary-button" onClick={() => api.downloadExcelTemplate()}>
@@ -552,7 +576,20 @@ function App() {
               <MetricCard label="产品数" value={datasetSummary.n_products} hint="用于计划与矩阵构建" />
               <MetricCard label="机台组" value={datasetSummary.n_tool_groups} hint="用于产能与瓶颈计算" />
               <MetricCard label="路线行数" value={datasetSummary.n_routes} hint="route master 明细规模" />
-              <MetricCard label="WIP Lot" value={datasetSummary.n_wip_lots || 0} hint="来自必填 sheet：wip_lot_detail" />
+              <MetricCard label="WIP Lot" value={datasetSummary.n_wip_lots || 0} hint="含 lot_status / 等待时间字段" />
+            </div>
+          ) : null}
+          {analysis?.demandResponse ? (
+            <div className="result-card note-card" style={{ marginTop: "12px" }}>
+              <div className="split-line">
+                <div>
+                  <h3>{r6PlanMode ? "R6 月度投片需求" : "投片需求计划"}</h3>
+                  <p className="muted">
+                    当前窗口 {timeWindow}，来自 Excel `demand_plan`，共 {selectedDemandRecords.length} 个产品，合计 {formatNumber(r6DemandTotal)} wafers。
+                  </p>
+                </div>
+                <StatusPill label={r6PlanMode ? "R6月度" : "周度/样例"} tone={r6PlanMode ? "ok" : "neutral"} />
+              </div>
             </div>
           ) : null}
         </section>
@@ -871,18 +908,35 @@ function App() {
                 {productionPlan ? (
                   <>
                     <div className="mini-grid four">
+                      <MetricCard label="冻结状态" value={readiness.label} hint={readiness.hint} />
                       <MetricCard
-                        label="可行性"
-                        value={productionPlan.feasible ? "可行" : "不可行"}
-                        hint={productionPlan.metadata?.lp_adjusted ? "LP调整后可行" : `评分 ${productionPlan.feasibility_score?.toFixed(0) || "--"}/100`}
+                        label="承诺可行性"
+                        value={commitFeasible ? "可承诺" : "待确认/不可承诺"}
+                        hint={
+                          productionPlan.metadata?.capacity_feasible && !commitFeasible
+                            ? "产能可行但冻结前需最优求解确认"
+                            : `评分 ${productionPlan.feasibility_score?.toFixed(0) || "--"}/100`
+                        }
                       />
                       <MetricCard label="整体 Loading" value={formatPercent(productionPlan.overall_loading_pct)} hint="所有机台组平均" />
-                      <MetricCard label="预估总利润" value={`¥${formatNumber(productionPlan.total_profit)}`} hint="基于可达产量计算" />
                       <MetricCard
                         label="需求调整"
                         value={productionPlan.metadata?.demand_reduction > 0 ? `-${formatNumber(productionPlan.metadata.demand_reduction)}` : "无需调整"}
                         hint={`原始 ${formatNumber(productionPlan.metadata?.original_demand_total || 0)} → 调整 ${formatNumber(productionPlan.metadata?.adjusted_demand_total || 0)}`}
                       />
+                    </div>
+
+                    <div className="result-card note-card" style={{ marginTop: "12px" }}>
+                      <div className="split-line">
+                        <div>
+                          <h3>{r6PlanMode ? "R6 冻结判定" : "计划承诺判定"}</h3>
+                          <p className="muted">
+                            当前计划窗口 {timeWindow}，求解状态 {productionPlan.metadata?.lp_status || "无需LP"}，
+                            决策状态 {productionPlan.metadata?.decision_readiness || "待分析"}。
+                          </p>
+                        </div>
+                        <StatusPill label={readiness.label} tone={readiness.tone} />
+                      </div>
                     </div>
 
                     {productionPlan.metadata?.wip_adjustment_enabled ? (

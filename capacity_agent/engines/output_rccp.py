@@ -17,13 +17,93 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+def _period_index_from_week_id(week_id: str) -> tuple[str, int]:
+    """Return (year, week) for simple ISO week strings like 2026-W17."""
+    try:
+        year, week = str(week_id).split("-W", 1)
+        return year, int(week)
+    except (ValueError, TypeError):
+        now = datetime.utcnow()
+        return str(now.year), int(now.isocalendar()[1])
+
+
+def _add_weeks(week_id: str, week_offset: int) -> str:
+    year, week = _period_index_from_week_id(week_id)
+    week += int(week_offset)
+    year_num = int(year)
+    while week > 52:
+        week -= 52
+        year_num += 1
+    while week < 1:
+        week += 52
+        year_num -= 1
+    return f"{year_num}-W{week:02d}"
+
+
+def _month_from_week(week_id: str) -> str:
+    """Approximate an ISO week bucket to YYYY-MM for R6 monthly planning."""
+    year, week = _period_index_from_week_id(week_id)
+    # R6 is a monthly commitment view. Use the week-ending day so a week that
+    # starts in the prior month but mostly belongs to the target month is not
+    # lost from that month's capacity bucket.
+    dt = datetime.fromisocalendar(int(year), int(week), 7)
+    return dt.strftime("%Y-%m")
+
+
+def _bucket_key(week_id: str, granularity: str) -> str:
+    return _month_from_week(week_id) if granularity == "monthly" else week_id
+
+
+def _week_start(week_id: str) -> datetime:
+    text = str(week_id or "")
+    if len(text) == 7 and text[4] == "-":
+        year, month = text.split("-", 1)
+        return datetime(int(year), int(month), 1)
+    year, week = _period_index_from_week_id(week_id)
+    return datetime.fromisocalendar(int(year), int(week), 1)
+
+
+def _bucket_key_from_datetime(dt: datetime, granularity: str) -> str:
+    if granularity == "monthly":
+        return dt.strftime("%Y-%m")
+    iso = dt.isocalendar()
+    return f"{iso.year}-W{iso.week:02d}"
+
+
+def _next_bucket_start(dt: datetime, granularity: str) -> datetime:
+    if granularity == "monthly":
+        if dt.month == 12:
+            return datetime(dt.year + 1, 1, 1)
+        return datetime(dt.year, dt.month + 1, 1)
+    week_start = dt - timedelta(days=dt.weekday())
+    return datetime(week_start.year, week_start.month, week_start.day) + timedelta(days=7)
+
+
+def _lot_start_offset_hours(lot: pd.Series, current_week: str, week_duration_days: float) -> float:
+    """Optional WIP queue/hold offset before remaining-route load starts."""
+    offset_hours = 0.0
+    remaining_wait = pd.to_numeric(pd.Series([lot.get("remaining_wait_hours")]), errors="coerce").iloc[0]
+    if pd.notna(remaining_wait) and float(remaining_wait) > 0:
+        offset_hours = max(offset_hours, float(remaining_wait))
+
+    release_date = pd.to_datetime(lot.get("hold_release_date"), errors="coerce")
+    if pd.notna(release_date):
+        release_offset = (release_date.to_pydatetime() - _week_start(current_week)).total_seconds() / 3600.0
+        offset_hours = max(offset_hours, release_offset)
+
+    lot_status = str(lot.get("lot_status", "") or "").upper()
+    if lot_status in {"HOLD", "ON_HOLD"} and offset_hours <= 0:
+        offset_hours = max(week_duration_days, 1.0) * 24.0
+    return max(offset_hours, 0.0)
 
 
 # ============================================================
@@ -329,6 +409,75 @@ def compute_wip_remaining_load(
             load_by_tg_product[tg_id][product_id] += lot_hours
     
     return load_by_tg_product
+
+
+def compute_wip_remaining_load_by_period(
+    wip_lot_detail: pd.DataFrame,
+    route: pd.DataFrame,
+    current_week: str = "2026-W17",
+    granularity: str = "weekly",
+    week_duration_days: float = 7.0,
+) -> dict[str, dict[str, dict[str, float]]]:
+    """
+    Spread WIP remaining load into future week/month buckets.
+
+    This is still an RCCP approximation, but it prevents a long-CT storage fab lot
+    from placing all downstream route hours into the current planning bucket.
+    """
+    load_by_period: dict[str, dict[str, dict[str, float]]] = {}
+    if wip_lot_detail.empty or route.empty:
+        return load_by_period
+
+    granularity = "monthly" if granularity == "monthly" else "weekly"
+
+    for _, lot in wip_lot_detail.iterrows():
+        product_id = lot["product_id"]
+        current_step = lot["current_step_seq"]
+        wafer_count = float(lot["wafer_count"])
+        product_route = route[
+            (route["product_id"] == product_id) &
+            (route["step_seq"] >= current_step)
+        ].sort_values("step_seq")
+
+        elapsed_hours = 0.0
+        anchor = _week_start(current_week) + timedelta(
+            hours=_lot_start_offset_hours(lot, current_week, week_duration_days)
+        )
+        for _, step in product_route.iterrows():
+            tg_id = step["tool_group_id"]
+            batch_size = max(float(step.get("batch_size", 1) or 1), 1.0)
+            visit_count = float(step.get("visit_count", 1) or 1)
+            run_time = float(step.get("run_time_hr", 0) or 0)
+            step_hours = run_time * visit_count / batch_size * wafer_count
+            if step_hours <= 0:
+                continue
+
+            # Use the same RCCP elapsed-time approximation as before, but split
+            # each step across calendar bucket boundaries instead of assigning
+            # the whole operation to a single midpoint month/week.
+            step_start = anchor + timedelta(hours=elapsed_hours)
+            step_end = anchor + timedelta(hours=elapsed_hours + step_hours)
+            cursor = step_start
+            while cursor < step_end:
+                boundary = min(_next_bucket_start(cursor, granularity), step_end)
+                segment_ratio = (boundary - cursor).total_seconds() / max((step_end - step_start).total_seconds(), 1.0)
+                segment_hours = step_hours * segment_ratio
+                period = _bucket_key_from_datetime(cursor, granularity)
+
+                load_by_period.setdefault(period, {}).setdefault(tg_id, {}).setdefault(product_id, 0.0)
+                load_by_period[period][tg_id][product_id] += segment_hours
+                cursor = boundary
+            elapsed_hours += step_hours
+
+    return load_by_period
+
+
+def collapse_wip_period_load(
+    period_load: dict[str, dict[str, dict[str, float]]],
+    target_period: str,
+) -> dict[str, dict[str, float]]:
+    """Return {tool_group: {product: hours}} for one planning bucket."""
+    return period_load.get(target_period, {})
 
 
 def compute_new_input_load_distribution(

@@ -26,8 +26,10 @@ export const api = {
     formData.append("file", file);
     return request(`${ENGINE_BASE}/data/excel/import`, { method: "POST", body: formData });
   },
-  toolGroupStatus: (datasetId) =>
-    request(`${ENGINE_BASE}/data/tool_group_status?dataset_id=${encodeURIComponent(datasetId)}&time_range=current`),
+  toolGroupStatus: (datasetId, timeWindow = "") =>
+    request(
+      `${ENGINE_BASE}/data/tool_group_status?dataset_id=${encodeURIComponent(datasetId)}&time_range=current&time_window=${encodeURIComponent(timeWindow)}`
+    ),
   demandPlan: (datasetId, timeWindow) =>
     request(
       `${ENGINE_BASE}/data/demand_plan?dataset_id=${encodeURIComponent(datasetId)}&time_window=${encodeURIComponent(

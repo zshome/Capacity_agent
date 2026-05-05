@@ -29,7 +29,11 @@ import pandas as pd
 
 from engines.rccp import RCCPInput, compute_rccp, THRESHOLDS
 from engines.bottleneck_analyzer import BottleneckInput, analyze_bottleneck
-from engines.output_rccp import compute_wip_remaining_load
+from engines.output_rccp import (
+    collapse_wip_period_load,
+    compute_wip_remaining_load,
+    compute_wip_remaining_load_by_period,
+)
 
 try:
     from engines.allocation_model import AllocationInput, AllocationObjective, allocate, ALLOCATION_AVAILABLE
@@ -39,12 +43,13 @@ except ImportError:
     allocate = None
 
 try:
-    from engines.lp_optimizer import LPInput, Objective, optimize, PYOMO_AVAILABLE
+    from engines.lp_optimizer import LPInput, Objective, optimize, PYOMO_AVAILABLE, solve_greedy_heuristic
 except ImportError:
     PYOMO_AVAILABLE = False
     LPInput = None
     Objective = None
     optimize = None
+    solve_greedy_heuristic = None
 
 logger = logging.getLogger(__name__)
 
@@ -112,12 +117,12 @@ class ProductionPlanResult:
             "weekly_plan": [
                 {
                     "product_id": p.product_id,
-                    "target_wafers": round(p.target_wafers, 0),
-                    "allocated_wafers": round(p.allocated_wafers, 0),
-                    "original_achievable_wafers": round(p.original_achievable_wafers, 0),
-                    "achievable_wafers": round(p.achievable_wafers, 0),
-                    "gap_wafers": round(p.gap_wafers, 0),
-                    "original_gap_wafers": round(p.original_gap_wafers, 0),
+                    "target_wafers": float(round(p.target_wafers, 0)),
+                    "allocated_wafers": float(round(p.allocated_wafers, 0)),
+                    "original_achievable_wafers": float(round(p.original_achievable_wafers, 0)),
+                    "achievable_wafers": float(round(p.achievable_wafers, 0)),
+                    "gap_wafers": float(round(p.gap_wafers, 0)),
+                    "original_gap_wafers": float(round(p.original_gap_wafers, 0)),
                     "priority": p.priority,
                     "unit_profit": round(p.unit_profit, 2),
                     "total_profit": round(p.total_profit, 2),
@@ -173,6 +178,7 @@ class ProductionPlanInput:
     lp_solver: str = "cbc"                     # LP求解器
     lp_time_limit: int = 60                    # LP求解时限(秒)
     time_window: str = "weekly"                # weekly | monthly
+    planning_granularity: str = "weekly"       # weekly | monthly
     objective: str = "max_profit"              # max_profit | max_output | balance
 
 
@@ -203,8 +209,18 @@ def generate_production_plan(inp: ProductionPlanInput) -> ProductionPlanResult:
 
     # 2. 计算 WIP 后续负载，并生成 WIP 校正后的 RCCP 结果
     wip_hours_by_tg: dict[str, float] = {}
+    wip_period_load: dict[str, dict[str, dict[str, float]]] = {}
     if inp.enable_wip_adjustment and inp.wip_lot_detail is not None and inp.routes is not None:
-        wip_load = compute_wip_remaining_load(inp.wip_lot_detail, inp.routes)
+        if inp.planning_granularity == "monthly":
+            wip_period_load = compute_wip_remaining_load_by_period(
+                inp.wip_lot_detail,
+                inp.routes,
+                current_week=_coerce_month_id(inp.time_window),
+                granularity="monthly",
+            )
+            wip_load = collapse_wip_period_load(wip_period_load, _coerce_month_id(inp.time_window))
+        else:
+            wip_load = compute_wip_remaining_load(inp.wip_lot_detail, inp.routes)
         wip_hours_by_tg = {
             tg_id: float(sum(product_hours.values()))
             for tg_id, product_hours in wip_load.items()
@@ -233,7 +249,7 @@ def generate_production_plan(inp: ProductionPlanInput) -> ProductionPlanResult:
         for product_id in products
     }
     
-    if not rccp_result.feasible and inp.lp_enabled and PYOMO_AVAILABLE and LPInput and Objective:
+    if not rccp_result.feasible and inp.lp_enabled and LPInput and Objective:
         try:
             # 构建demand_max：优先使用用户传入值，否则用产能上限
             demand_max_for_lp = inp.demand_max if inp.demand_max else capacity_per_product
@@ -256,7 +272,11 @@ def generate_production_plan(inp: ProductionPlanInput) -> ProductionPlanResult:
                 solver=inp.lp_solver,
                 time_limit_seconds=inp.lp_time_limit,
             )
-            lp_result = optimize(lp_inp)
+            if PYOMO_AVAILABLE and optimize:
+                lp_result = optimize(lp_inp)
+            elif solve_greedy_heuristic:
+                lp_result = solve_greedy_heuristic(lp_inp)
+                lp_result.metadata["decision_quality"] = "fallback_heuristic"
             
             # 使用LP优化结果调整需求计划
             if lp_result and lp_result.status in ("optimal", "heuristic", "timeout") and lp_result.optimal_plan:
@@ -302,6 +322,8 @@ def generate_production_plan(inp: ProductionPlanInput) -> ProductionPlanResult:
     )
 
     adjusted_plan_feasible = _is_plan_feasible(rccp_result)
+    decision_readiness = _decision_readiness(adjusted_plan_feasible, lp_result)
+    commit_feasible = decision_readiness in {"commit_ready_no_adjustment", "commit_ready_optimal"}
 
     # 8. 计算总利润
     total_profit = sum(p.total_profit for p in weekly_plan)
@@ -320,7 +342,7 @@ def generate_production_plan(inp: ProductionPlanInput) -> ProductionPlanResult:
     )
 
     return ProductionPlanResult(
-        feasible=adjusted_plan_feasible,
+        feasible=commit_feasible,
         feasibility_score=feasibility_score,
         weekly_plan=weekly_plan,
         tool_allocation=tool_allocation,
@@ -333,18 +355,29 @@ def generate_production_plan(inp: ProductionPlanInput) -> ProductionPlanResult:
             "n_products": len(products),
             "n_tool_groups": len(rccp_result.loading_table),
             "time_window": inp.time_window,
+            "planning_granularity": inp.planning_granularity,
             "objective": inp.objective,
             "original_feasible": original_rccp.feasible,
             "wip_adjusted_feasible": adjusted_plan_feasible,
             "lp_adjusted": lp_result is not None and lp_result.status in ("optimal", "heuristic", "timeout"),
             "lp_status": lp_result.status if lp_result is not None else None,
+            "decision_readiness": decision_readiness,
+            "commit_feasible": commit_feasible,
+            "capacity_feasible": adjusted_plan_feasible,
             "adjusted_feasible": adjusted_plan_feasible,
             "original_demand_total": sum(inp.demand_plan.values()),
-            "adjusted_demand_total": sum(adjusted_demand.values()),
-            "demand_reduction": sum(inp.demand_plan.values()) - sum(adjusted_demand.values()),  # 需求削减量
+            "adjusted_demand_total": float(sum(adjusted_demand.values())),
+            "demand_reduction": float(sum(inp.demand_plan.values()) - sum(adjusted_demand.values())),  # 需求削减量
             "wip_adjustment_enabled": inp.enable_wip_adjustment,
             "wip_total_hours": round(sum(wip_hours_by_tg.values()), 2),
             "wip_hours_by_tool_group": {k: round(v, 2) for k, v in wip_hours_by_tg.items()},
+            "wip_period_load": {
+                period: {
+                    tg: round(sum(product_hours.values()), 2)
+                    for tg, product_hours in tg_hours.items()
+                }
+                for period, tg_hours in wip_period_load.items()
+            },
             "original_overall_loading_pct": round(original_rccp.overall_loading_pct, 2),
             "wip_adjusted_overall_loading_pct": round(rccp_result.overall_loading_pct, 2),
         },
@@ -389,6 +422,29 @@ def _compute_capacity_per_product(
             result[product] = float('inf')  # 无产能约束
     
     return result
+
+
+def _coerce_week_id(time_window: str) -> str:
+    text = str(time_window or "")
+    if "-W" in text:
+        return text
+    month_id = _coerce_month_id(text)
+    try:
+        year, month = month_id.split("-", 1)
+        iso = datetime(int(year), int(month), 1).isocalendar()
+        return f"{iso.year}-W{iso.week:02d}"
+    except (ValueError, TypeError):
+        pass
+    return "2026-W17"
+
+
+def _coerce_month_id(time_window: str) -> str:
+    text = str(time_window or "")
+    parts = text.replace("_", "-").split("-")
+    for idx in range(len(parts) - 1):
+        if parts[idx].isdigit() and len(parts[idx]) == 4 and parts[idx + 1].isdigit():
+            return f"{parts[idx]}-{int(parts[idx + 1]):02d}"
+    return text if len(text) == 7 and text[4] == "-" else "2026-05"
 
 
 def _build_weekly_plan(
@@ -548,6 +604,16 @@ def _is_plan_feasible(rccp_result) -> bool:
     return all(tg.loading_pct <= 100.0 + PRODUCTION_FEASIBILITY_EPSILON for tg in rccp_result.loading_table)
 
 
+def _decision_readiness(adjusted_plan_feasible: bool, lp_result: Any | None) -> str:
+    if not adjusted_plan_feasible:
+        return "not_commit_ready"
+    if lp_result is None:
+        return "commit_ready_no_adjustment"
+    if lp_result.status == "optimal":
+        return "commit_ready_optimal"
+    return "solver_required_for_final_commit"
+
+
 def _generate_recommendations(
     adjusted_plan_feasible: bool,
     rccp_result,
@@ -559,7 +625,9 @@ def _generate_recommendations(
     """生成建议措施"""
     recommendations = []
     
-    if adjusted_plan_feasible:
+    if adjusted_plan_feasible and lp_result is not None and lp_result.status != "optimal":
+        recommendations.append("⚠️ 当前仅通过启发式方案校正为产能可行，正式冻结前需运行最优求解器验证")
+    elif adjusted_plan_feasible:
         recommendations.append("✅ 当前产能可满足需求计划，建议按计划执行")
         
         # 有瓶颈但不过载

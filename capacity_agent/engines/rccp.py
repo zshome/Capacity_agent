@@ -245,9 +245,15 @@ def build_capacity_matrix(
         if path_mix is None:
             path_mix = {}
 
-    # 计算每个 step 的有效占用 = run_time / batch_size (visit_count 默认 1, reentrant 在 route 中已展开)
+    # 计算每个 step 的有效占用。存储厂路线经常用 visit_count 表达重入次数，
+    # 若路线已逐工序展开则 visit_count 默认为 1。
     route_master = route_master.copy()
-    route_master["unit_hours"] = route_master["run_time_hr"] / route_master["batch_size"].clip(lower=1)
+    route_master["visit_count"] = pd.to_numeric(route_master.get("visit_count", 1), errors="coerce").fillna(1.0)
+    route_master["unit_hours"] = (
+        route_master["run_time_hr"]
+        * route_master["visit_count"]
+        / route_master["batch_size"].clip(lower=1)
+    )
 
     # 按 (product, path, tool_group) 聚合
     grouped = (
@@ -262,7 +268,10 @@ def build_capacity_matrix(
             return path_mix.get(row["product_id"], {}).get(row["path_id"], 1.0)
         grouped["alpha"] = grouped.apply(get_alpha, axis=1)
     else:
-        grouped["alpha"] = 1.0
+        # 若存在多条 path 但未显式传入 path_mix，按产品内 path 等权处理，
+        # 避免把多 path 当作全部必经路径重复计入。
+        path_counts = grouped.groupby("product_id")["path_id"].transform("nunique").clip(lower=1)
+        grouped["alpha"] = 1.0 / path_counts
 
     grouped["weighted_hours"] = grouped["unit_hours"] * grouped["alpha"]
 

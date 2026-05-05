@@ -11,6 +11,8 @@ Run:
 from __future__ import annotations
 
 import logging
+import calendar
+from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -40,7 +42,11 @@ except ImportError:
     optimize = None
     logging.warning("lp_optimizer not available (Pyomo not installed). LP optimization will return unavailable status.")
 from engines.rccp import RCCPInput, build_capacity_matrix, compute_rccp
-from engines.output_rccp import compute_wip_remaining_load
+from engines.output_rccp import (
+    collapse_wip_period_load,
+    compute_wip_remaining_load,
+    compute_wip_remaining_load_by_period,
+)
 from engines.scenario_classifier import (
     ScenarioInput,
     ScenarioType,
@@ -73,6 +79,115 @@ from engines.production_plan import (
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def _infer_planning_granularity(time_window: str | None) -> str:
+    text = str(time_window or "").lower()
+    if "-w" in text or text in {"this_week", "next_week", "weekly"}:
+        return "weekly"
+    return "monthly"
+
+
+def _period_days(time_window: str | None) -> float:
+    if _infer_planning_granularity(time_window) == "weekly":
+        return 7.0
+    try:
+        year, month = _coerce_month_id(time_window).split("-", 1)
+        return float(calendar.monthrange(int(year), int(month))[1])
+    except (ValueError, TypeError):
+        return 30.0
+
+
+def _coerce_week_id(time_window: str | None) -> str:
+    text = str(time_window or "")
+    if "-W" in text:
+        return text
+    month_id = _coerce_month_id(text)
+    try:
+        year, month = month_id.split("-", 1)
+        iso = datetime(int(year), int(month), 1).isocalendar()
+        return f"{iso.year}-W{iso.week:02d}"
+    except (ValueError, TypeError):
+        pass
+    return "2026-W17"
+
+
+def _coerce_month_id(time_window: str | None) -> str:
+    text = str(time_window or "")
+    parts = text.replace("_", "-").split("-")
+    for idx in range(len(parts) - 1):
+        if parts[idx].isdigit() and len(parts[idx]) == 4 and parts[idx + 1].isdigit():
+            return f"{parts[idx]}-{int(parts[idx + 1]):02d}"
+    return text if len(text) == 7 and text[4] == "-" else "2026-05"
+
+
+def _planning_window_bounds(time_window: str | None) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Inclusive-exclusive bounds for the selected weekly/monthly planning bucket."""
+    if _infer_planning_granularity(time_window) == "weekly":
+        year, week = _coerce_week_id(time_window).split("-W", 1)
+        start = datetime.fromisocalendar(int(year), int(week), 1)
+        return pd.Timestamp(start), pd.Timestamp(start + timedelta(days=7))
+
+    year, month = _coerce_month_id(time_window).split("-", 1)
+    start = datetime(int(year), int(month), 1)
+    if int(month) == 12:
+        end = datetime(int(year) + 1, 1, 1)
+    else:
+        end = datetime(int(year), int(month) + 1, 1)
+    return pd.Timestamp(start), pd.Timestamp(end)
+
+
+def _effective_available_hours(bundle, time_window: str | None) -> dict[str, float]:
+    """Effective capacity hours for the selected R6/weekly planning bucket."""
+    oee = bundle.oee.copy()
+    if oee.empty:
+        return {}
+    oee["fact_date"] = pd.to_datetime(oee["fact_date"], errors="coerce")
+    start, end = _planning_window_bounds(time_window)
+    period_oee = oee[(oee["fact_date"] >= start) & (oee["fact_date"] < end)]
+
+    use_calendar_rows = not period_oee.empty
+    source_oee = period_oee if use_calendar_rows else oee[oee["fact_date"] == oee["fact_date"].max()]
+    fallback_days = _period_days(time_window)
+    available_hours: dict[str, float] = {}
+    for _, row in source_oee.iterrows():
+        tg_id = row["tool_group_id"]
+        tg_info = bundle.tool_groups[bundle.tool_groups["tool_group_id"] == tg_id]
+        n_machines = int(tg_info.iloc[0].get("n_machines", 1) or 1) if not tg_info.empty else 1
+        availability = float(row.get("availability", 0.85) or 0.85)
+        performance = float(row.get("performance", 1.0) or 1.0)
+        explicit_hours = pd.to_numeric(pd.Series([row.get("available_hours")]), errors="coerce").iloc[0]
+        if pd.notna(explicit_hours) and float(explicit_hours) > 0:
+            row_hours = float(explicit_hours)
+        else:
+            row_hours = n_machines * 24.0 * availability * performance
+        if not use_calendar_rows:
+            row_hours *= fallback_days
+        available_hours[tg_id] = available_hours.get(tg_id, 0.0) + row_hours
+    return available_hours
+
+
+def _wip_base_load_for_period(
+    wip_df: pd.DataFrame,
+    routes: pd.DataFrame,
+    time_window: str | None,
+) -> dict[str, float]:
+    if wip_df.empty or routes.empty:
+        return {}
+    if _infer_planning_granularity(time_window) == "monthly":
+        period_load = compute_wip_remaining_load_by_period(
+            wip_df,
+            routes,
+            current_week=_coerce_month_id(time_window),
+            granularity="monthly",
+        )
+        wip_load = collapse_wip_period_load(period_load, _coerce_month_id(time_window))
+    else:
+        wip_load = compute_wip_remaining_load(wip_df, routes)
+    return {
+        tg_id: float(sum(product_hours.values()))
+        for tg_id, product_hours in wip_load.items()
+    }
 
 app = FastAPI(
     title="Capacity Engine API",
@@ -239,9 +354,22 @@ def download_excel_template():
 
 
 @app.get("/data/tool_group_status")
-def data_tool_group_status(area: str | None = None, time_range: str = "current", dataset_id: str | None = None):
+def data_tool_group_status(
+    area: str | None = None,
+    time_range: str = "current",
+    dataset_id: str | None = None,
+    time_window: str | None = None,
+):
     try:
         payload = DATASET_REGISTRY.get_tool_group_status_payload(dataset_id=dataset_id, area=area)
+        if time_window:
+            bundle = DATASET_REGISTRY.get_dataset(dataset_id)
+            effective_hours = _effective_available_hours(bundle, time_window)
+            for row in payload.get("tool_groups", []):
+                tg_id = row["tool_group_id"]
+                if tg_id in effective_hours:
+                    row["available_hours"] = round(effective_hours[tg_id], 2)
+                    row["capacity_period"] = _infer_planning_granularity(time_window)
         payload["time_range"] = time_range
         return payload
     except KeyError as e:
@@ -330,11 +458,7 @@ def rccp_compute(req: RCCPRequest):
         if req.enable_wip_adjustment and req.wip_lot_detail:
             bundle = DATASET_REGISTRY.get_dataset(req.dataset_id)
             wip_df = pd.DataFrame(req.wip_lot_detail)
-            wip_load = compute_wip_remaining_load(wip_df, bundle.routes.copy())
-            wip_remaining_hours = {
-                tg_id: float(sum(product_hours.values()))
-                for tg_id, product_hours in wip_load.items()
-            }
+            wip_remaining_hours = _wip_base_load_for_period(wip_df, bundle.routes.copy(), req.time_window)
 
         inp = RCCPInput(
             demand_plan=req.demand_plan,
@@ -412,6 +536,10 @@ class LPRequest(BaseModel):
     tool_groups: list[str]
     capacity_matrix: dict[str, dict[str, float]]
     available_hours: dict[str, float]
+    dataset_id: str | None = None
+    wip_lot_detail: list[dict[str, Any]] | None = None
+    enable_wip_adjustment: bool = False
+    base_load_hours: dict[str, float] = Field(default_factory=dict)
     demand_min: dict[str, float] = Field(default_factory=dict)
     demand_max: dict[str, float] = Field(default_factory=dict)
     demand_target: dict[str, float] = Field(default_factory=dict)
@@ -420,6 +548,7 @@ class LPRequest(BaseModel):
     objective: str = "max_profit"
     solver: str = "cbc"
     time_limit_seconds: int = 60
+    time_window: str = "weekly"
 
 
 @app.post("/lp/optimize")
@@ -433,11 +562,18 @@ def lp_optimize(req: LPRequest):
         }
     try:
         cm = pd.DataFrame(req.capacity_matrix).T.fillna(0.0)
+        base_load_hours = dict(req.base_load_hours)
+        if req.enable_wip_adjustment and req.wip_lot_detail:
+            bundle = DATASET_REGISTRY.get_dataset(req.dataset_id)
+            base_load_hours.update(
+                _wip_base_load_for_period(pd.DataFrame(req.wip_lot_detail), bundle.routes.copy(), req.time_window)
+            )
         inp = LPInput(
             products=req.products,
             tool_groups=req.tool_groups,
             capacity_matrix=cm,
             available_hours=req.available_hours,
+            base_load_hours=base_load_hours,
             demand_min=req.demand_min,
             demand_max=req.demand_max,
             demand_target=req.demand_target,
@@ -929,6 +1065,7 @@ class ProductionPlanRequest(BaseModel):
     lp_solver: str = Field(default="cbc", description="LP求解器")
     lp_time_limit: int = Field(default=60, description="LP求解时限(秒)")
     time_window: str = Field(default="weekly", description="weekly | monthly")
+    planning_granularity: str = Field(default="weekly", description="weekly | monthly")
     objective: str = Field(default="max_profit", description="max_profit | max_output | balance")
 
 
@@ -965,6 +1102,7 @@ def plan_generate(req: ProductionPlanRequest):
             lp_solver=req.lp_solver,
             lp_time_limit=req.lp_time_limit,
             time_window=req.time_window,
+            planning_granularity=req.planning_granularity,
             objective=req.objective,
         )
         
@@ -1008,29 +1146,10 @@ def plan_generate_from_dataset(req: ProductionPlanFromDatasetRequest):
         # 构建产能矩阵
         capacity_matrix = build_capacity_matrix(bundle.routes.copy())
         
-        # 获取可用小时（从最新OEE聚合）
-        latest_date = pd.to_datetime(bundle.oee["fact_date"]).max()
-        latest_oee = bundle.oee.copy()
-        latest_oee["fact_date"] = pd.to_datetime(latest_oee["fact_date"])
-        latest_oee = latest_oee[latest_oee["fact_date"] == latest_date]
-        
-        # 计算每周可用小时 (假设一周7天)
-        weekly_hours = {}
-        for _, row in latest_oee.iterrows():
-            tg_id = row["tool_group_id"]
-            daily_hours = row.get("available_hours", 0) or 0
-            # 从tool_groups获取机台数，计算周产能
-            tg_info = bundle.tool_groups[bundle.tool_groups["tool_group_id"] == tg_id]
-            if not tg_info.empty:
-                n_machines = int(tg_info.iloc[0].get("n_machines", 1) or 1)
-                # 周可用小时 = 机台数 × 24小时 × 7天 × 可用率
-                weekly_hours[tg_id] = n_machines * 24 * 7 * float(row.get("availability", 0.85) or 0.85)
-            else:
-                weekly_hours[tg_id] = daily_hours * 7
-        
         # 获取需求计划
         time_windows = sorted(bundle.demand["time_window"].astype(str).unique().tolist())
         selected_window = req.time_window or time_windows[0] if time_windows else "this_week"
+        available_hours = _effective_available_hours(bundle, selected_window)
         
         demand = bundle.demand.copy()
         demand = demand[demand["time_window"].astype(str) == selected_window]
@@ -1053,14 +1172,17 @@ def plan_generate_from_dataset(req: ProductionPlanFromDatasetRequest):
         demand_max = req.demand_max if req.demand_max is not None else default_demand_max
         demand_min = req.demand_min if req.demand_min is not None else {}
         
+        wip_source = pd.DataFrame(req.wip_lot_detail) if req.wip_lot_detail is not None else bundle.wip_lot_detail.copy()
+        wip_enabled = req.enable_wip_adjustment and not wip_source.empty
+
         # 生成计划
         inp = ProductionPlanInput(
             demand_plan=demand_plan,
             capacity_matrix=capacity_matrix,
-            available_hours=weekly_hours,
+            available_hours=available_hours,
             routes=bundle.routes.copy(),
-            wip_lot_detail=pd.DataFrame(req.wip_lot_detail) if req.wip_lot_detail else None,
-            enable_wip_adjustment=req.enable_wip_adjustment,
+            wip_lot_detail=wip_source if wip_enabled else None,
+            enable_wip_adjustment=wip_enabled,
             unit_profit=unit_profit,
             priority=priority,
             demand_min=demand_min,
@@ -1070,6 +1192,7 @@ def plan_generate_from_dataset(req: ProductionPlanFromDatasetRequest):
             lp_solver=req.lp_solver,
             lp_time_limit=req.lp_time_limit,
             time_window=selected_window,
+            planning_granularity=_infer_planning_granularity(selected_window),
             objective=req.objective,
         )
         
