@@ -2,14 +2,28 @@
 
 ## 概述
 
-系统支持通过 Excel 工作簿导入产能规划数据。Excel 文件需包含 **4 个必需 Sheet**：
+系统支持通过一个通用 Excel 工作簿导入产能规划数据。当前模板统一包含说明、基础 RCCP/R6/WIP 数据，以及复杂 Path/Backup 数据。
+
+基础导入必须包含 **5 个必需 Sheet**；如果启用复杂 Path，则需要同时填写 4 个复杂 Path Sheet：
 
 | Sheet 名称 | 用途 | 必需字段数 |
 |-----------|------|-----------|
 | `route_master` | 产品工艺路线 | 6 |
 | `tool_groups` | 机台组信息 | 5 |
 | `oee` | OEE 历史数据 | 7 |
-| `demand_plan` | 需求计划 | 3 |
+| `demand_plan` | 需求计划 | 5 |
+| `wip_lot_detail` | WIP Lot 明细 | 6 |
+
+复杂 Path 成套 Sheet：
+
+| Sheet 名称 | 用途 |
+|-----------|------|
+| `tool_master` | 单台设备主数据 |
+| `process_master` | 制程主数据与顺序 |
+| `tool_process_capability` | 产品-制程-单台设备能力矩阵 |
+| `backup_path` | Backup 替代路径 |
+
+> 若填写复杂 Path 任意一张表，必须同时补齐上述 4 张复杂 Path 表。
 
 ---
 

@@ -57,6 +57,38 @@ REQUIRED_SHEETS = {
     },
 }
 
+OPTIONAL_COMPLEX_PATH_SHEETS = {
+    "tool_master": {
+        "tool_id",
+        "tool_group_id",
+        "tool_name",
+        "status",
+        "uptime",
+        "loss_time",
+    },
+    "process_master": {
+        "process_id",
+        "process_name",
+        "process_seq",
+    },
+    "tool_process_capability": {
+        "product_id",
+        "process_id",
+        "tool_id",
+        "can_run",
+        "run_time_hr",
+        "batch_size",
+    },
+    "backup_path": {
+        "primary_tool_id",
+        "backup_tool_id",
+        "process_id",
+        "enable_rule",
+    },
+}
+
+COMPLEX_PATH_SHEET_NAMES = set(OPTIONAL_COMPLEX_PATH_SHEETS.keys())
+
 
 @dataclass
 class DatasetBundle:
@@ -69,6 +101,10 @@ class DatasetBundle:
     demand: pd.DataFrame
     wip_lot_detail: pd.DataFrame
     products: pd.DataFrame
+    tool_master: pd.DataFrame | None = None
+    process_master: pd.DataFrame | None = None
+    tool_process_capability: pd.DataFrame | None = None
+    backup_path: pd.DataFrame | None = None
 
 
 class DatasetRegistry:
@@ -76,6 +112,7 @@ class DatasetRegistry:
         self.sample_dir = Path(__file__).resolve().parent.parent / "data" / "sample"
         self._datasets: dict[str, DatasetBundle] = {}
         self._sample_bundle = self._load_or_generate_sample_bundle()
+        self._complex_path_bundle = self._build_complex_path_demo_bundle()
 
     def _load_or_generate_sample_bundle(self) -> DatasetBundle:
         sample = ensure_sample_files(self.sample_dir)
@@ -98,16 +135,157 @@ class DatasetRegistry:
                 "wait_hours_so_far",
             ]),
             products=sample.products,
+            tool_master=pd.DataFrame(columns=[
+                "tool_id",
+                "tool_group_id",
+                "tool_name",
+                "status",
+                "uptime",
+                "loss_time",
+            ]),
+            process_master=pd.DataFrame(columns=["process_id", "process_name", "process_seq"]),
+            tool_process_capability=pd.DataFrame(columns=[
+                "product_id",
+                "process_id",
+                "tool_id",
+                "can_run",
+                "run_time_hr",
+                "batch_size",
+                "path_type",
+            ]),
+            backup_path=pd.DataFrame(columns=[
+                "primary_tool_id",
+                "backup_tool_id",
+                "process_id",
+                "enable_rule",
+                "switch_cost",
+            ]),
+        )
+
+    def _build_complex_path_demo_bundle(self) -> DatasetBundle:
+        """Deterministic demo data for different Path + Backup validation."""
+        tool_groups = pd.DataFrame([
+            {"tool_group_id": "LITHO_MAIN", "tool_group_name": "ArF光刻主线", "area": "LITHO", "n_machines": 1, "nameplate_throughput_wph": 1.2},
+            {"tool_group_id": "LITHO_BACKUP", "tool_group_name": "ArF光刻Backup", "area": "LITHO", "n_machines": 1, "nameplate_throughput_wph": 1.0},
+            {"tool_group_id": "ETCH_A", "tool_group_name": "刻蚀A线", "area": "ETCH", "n_machines": 1, "nameplate_throughput_wph": 1.6},
+            {"tool_group_id": "DEPO_A", "tool_group_name": "薄膜A线", "area": "DEPO", "n_machines": 1, "nameplate_throughput_wph": 2.0},
+            {"tool_group_id": "CMP_A", "tool_group_name": "CMP共享线", "area": "CMP", "n_machines": 1, "nameplate_throughput_wph": 1.8},
+        ])
+
+        routes = pd.DataFrame([
+            {"product_id": "DRAM_A", "path_id": "DRAM_MAIN", "step_seq": 10, "tool_group_id": "LITHO_MAIN", "run_time_hr": 0.80, "batch_size": 1, "visit_count": 1, "route_version": "current"},
+            {"product_id": "DRAM_A", "path_id": "DRAM_MAIN", "step_seq": 20, "tool_group_id": "ETCH_A", "run_time_hr": 0.55, "batch_size": 1, "visit_count": 1, "route_version": "current"},
+            {"product_id": "DRAM_A", "path_id": "DRAM_MAIN", "step_seq": 30, "tool_group_id": "DEPO_A", "run_time_hr": 0.35, "batch_size": 1, "visit_count": 1, "route_version": "current"},
+            {"product_id": "DRAM_A", "path_id": "DRAM_MAIN", "step_seq": 40, "tool_group_id": "LITHO_MAIN", "run_time_hr": 0.90, "batch_size": 1, "visit_count": 1, "route_version": "current"},
+            {"product_id": "DRAM_A", "path_id": "DRAM_MAIN", "step_seq": 50, "tool_group_id": "CMP_A", "run_time_hr": 0.30, "batch_size": 1, "visit_count": 1, "route_version": "current"},
+            {"product_id": "NAND_B", "path_id": "NAND_ALT", "step_seq": 10, "tool_group_id": "LITHO_BACKUP", "run_time_hr": 0.70, "batch_size": 1, "visit_count": 1, "route_version": "current"},
+            {"product_id": "NAND_B", "path_id": "NAND_ALT", "step_seq": 20, "tool_group_id": "DEPO_A", "run_time_hr": 0.50, "batch_size": 1, "visit_count": 1, "route_version": "current"},
+            {"product_id": "NAND_B", "path_id": "NAND_ALT", "step_seq": 30, "tool_group_id": "ETCH_A", "run_time_hr": 0.70, "batch_size": 1, "visit_count": 1, "route_version": "current"},
+            {"product_id": "NAND_B", "path_id": "NAND_ALT", "step_seq": 40, "tool_group_id": "LITHO_BACKUP", "run_time_hr": 0.75, "batch_size": 1, "visit_count": 1, "route_version": "current"},
+            {"product_id": "NAND_B", "path_id": "NAND_ALT", "step_seq": 50, "tool_group_id": "CMP_A", "run_time_hr": 0.40, "batch_size": 1, "visit_count": 1, "route_version": "current"},
+        ])
+
+        products = pd.DataFrame([
+            {"product_id": "DRAM_A", "product_name": "DRAM A", "product_family": "DRAM", "technology_node": "1xnm", "is_active": True},
+            {"product_id": "NAND_B", "product_name": "NAND B", "product_family": "NAND", "technology_node": "128L", "is_active": True},
+        ])
+
+        oee_records = []
+        for date in pd.date_range("2026-05-01", "2026-05-31"):
+            for tg_id, available_hours, availability in [
+                ("LITHO_MAIN", 18.0, 0.75),
+                ("LITHO_BACKUP", 16.0, 0.70),
+                ("ETCH_A", 20.0, 0.83),
+                ("DEPO_A", 19.0, 0.79),
+                ("CMP_A", 21.0, 0.88),
+            ]:
+                oee_records.append({
+                    "fact_date": date.date(),
+                    "tool_group_id": tg_id,
+                    "availability": availability,
+                    "performance": 0.95,
+                    "quality": 0.99,
+                    "oee": round(availability * 0.95 * 0.99, 4),
+                    "available_hours": available_hours,
+                })
+        oee = pd.DataFrame(oee_records)
+
+        demand = pd.DataFrame([
+            {"time_window": "R6-2026-05", "product_id": "DRAM_A", "wafer_count": 620, "plan_version": "R6", "release_status": "frozen", "priority": 1, "contract_min": 420, "market_max": 760, "unit_profit": 150},
+            {"time_window": "R6-2026-05", "product_id": "NAND_B", "wafer_count": 520, "plan_version": "R6", "release_status": "frozen", "priority": 2, "contract_min": 320, "market_max": 680, "unit_profit": 110},
+            {"time_window": "R6-2026-06", "product_id": "DRAM_A", "wafer_count": 560, "plan_version": "R6", "release_status": "draft", "priority": 1, "contract_min": 380, "market_max": 720, "unit_profit": 150},
+            {"time_window": "R6-2026-06", "product_id": "NAND_B", "wafer_count": 480, "plan_version": "R6", "release_status": "draft", "priority": 2, "contract_min": 300, "market_max": 640, "unit_profit": 110},
+        ])
+
+        wip_lot_detail = pd.DataFrame([
+            {"lot_id": "CPWIP001", "product_id": "DRAM_A", "current_step_seq": 20, "wafer_count": 80, "percent_complete": 35, "lot_status": "RUN", "good_wafer_count": 78, "wait_hours_so_far": 5.0, "remaining_wait_hours": 0.0},
+            {"lot_id": "CPWIP002", "product_id": "DRAM_A", "current_step_seq": 40, "wafer_count": 60, "percent_complete": 72, "lot_status": "WAIT", "good_wafer_count": 59, "wait_hours_so_far": 18.0, "remaining_wait_hours": 0.0},
+            {"lot_id": "CPWIP003", "product_id": "NAND_B", "current_step_seq": 10, "wafer_count": 90, "percent_complete": 20, "lot_status": "WAIT", "good_wafer_count": 88, "wait_hours_so_far": 12.0, "remaining_wait_hours": 0.0},
+            {"lot_id": "CPWIP004", "product_id": "NAND_B", "current_step_seq": 30, "wafer_count": 70, "percent_complete": 60, "lot_status": "HOLD", "good_wafer_count": 69, "wait_hours_so_far": 30.0, "remaining_wait_hours": 24.0},
+        ])
+
+        tool_master = pd.DataFrame([
+            {"tool_id": "LM_T01", "tool_group_id": "LITHO_MAIN", "tool_name": "ArF主线-01", "status": "RUN", "uptime": 0.75, "loss_time": 0.05},
+            {"tool_id": "LB_T01", "tool_group_id": "LITHO_BACKUP", "tool_name": "ArF备援-01", "status": "RUN", "uptime": 0.70, "loss_time": 0.05},
+            {"tool_id": "EA_T01", "tool_group_id": "ETCH_A", "tool_name": "刻蚀A-01", "status": "RUN", "uptime": 0.83, "loss_time": 0.03},
+            {"tool_id": "DA_T01", "tool_group_id": "DEPO_A", "tool_name": "薄膜A-01", "status": "RUN", "uptime": 0.79, "loss_time": 0.03},
+            {"tool_id": "CA_T01", "tool_group_id": "CMP_A", "tool_name": "CMP-01", "status": "RUN", "uptime": 0.88, "loss_time": 0.04},
+        ])
+
+        process_master = pd.DataFrame([
+            {"process_id": "PHOTO_1", "process_name": "首层光刻", "process_seq": 10, "area": "LITHO"},
+            {"process_id": "ETCH_1", "process_name": "关键刻蚀", "process_seq": 20, "area": "ETCH"},
+            {"process_id": "DEPO_1", "process_name": "薄膜沉积", "process_seq": 30, "area": "DEPO"},
+            {"process_id": "PHOTO_2", "process_name": "二次光刻", "process_seq": 40, "area": "LITHO"},
+            {"process_id": "CMP_1", "process_name": "CMP平坦化", "process_seq": 50, "area": "CMP"},
+        ])
+
+        tool_process_capability = pd.DataFrame([
+            {"product_id": "DRAM_A", "process_id": "PHOTO_1", "tool_id": "LM_T01", "can_run": True, "run_time_hr": 0.80, "batch_size": 1, "path_type": "primary", "visit_count": 1},
+            {"product_id": "DRAM_A", "process_id": "PHOTO_1", "tool_id": "LB_T01", "can_run": True, "run_time_hr": 1.05, "batch_size": 1, "path_type": "backup", "visit_count": 1},
+            {"product_id": "DRAM_A", "process_id": "ETCH_1", "tool_id": "EA_T01", "can_run": True, "run_time_hr": 0.55, "batch_size": 1, "path_type": "primary", "visit_count": 1},
+            {"product_id": "DRAM_A", "process_id": "DEPO_1", "tool_id": "DA_T01", "can_run": True, "run_time_hr": 0.35, "batch_size": 1, "path_type": "primary", "visit_count": 1},
+            {"product_id": "DRAM_A", "process_id": "PHOTO_2", "tool_id": "LM_T01", "can_run": True, "run_time_hr": 0.90, "batch_size": 1, "path_type": "primary", "visit_count": 1},
+            {"product_id": "DRAM_A", "process_id": "PHOTO_2", "tool_id": "LB_T01", "can_run": True, "run_time_hr": 1.10, "batch_size": 1, "path_type": "backup", "visit_count": 1},
+            {"product_id": "DRAM_A", "process_id": "CMP_1", "tool_id": "CA_T01", "can_run": True, "run_time_hr": 0.30, "batch_size": 1, "path_type": "primary", "visit_count": 1},
+            {"product_id": "NAND_B", "process_id": "PHOTO_1", "tool_id": "LB_T01", "can_run": True, "run_time_hr": 0.70, "batch_size": 1, "path_type": "primary", "visit_count": 1},
+            {"product_id": "NAND_B", "process_id": "ETCH_1", "tool_id": "EA_T01", "can_run": True, "run_time_hr": 0.70, "batch_size": 1, "path_type": "primary", "visit_count": 1},
+            {"product_id": "NAND_B", "process_id": "DEPO_1", "tool_id": "DA_T01", "can_run": True, "run_time_hr": 0.50, "batch_size": 1, "path_type": "primary", "visit_count": 1},
+            {"product_id": "NAND_B", "process_id": "PHOTO_2", "tool_id": "LB_T01", "can_run": True, "run_time_hr": 0.75, "batch_size": 1, "path_type": "primary", "visit_count": 1},
+            {"product_id": "NAND_B", "process_id": "CMP_1", "tool_id": "CA_T01", "can_run": True, "run_time_hr": 0.40, "batch_size": 1, "path_type": "primary", "visit_count": 1},
+        ])
+
+        backup_path = pd.DataFrame([
+            {"primary_tool_id": "LM_T01", "backup_tool_id": "LB_T01", "process_id": "PHOTO_1", "enable_rule": "primary_overload", "switch_cost": 0.08},
+            {"primary_tool_id": "LM_T01", "backup_tool_id": "LB_T01", "process_id": "PHOTO_2", "enable_rule": "primary_overload", "switch_cost": 0.10},
+        ])
+
+        return DatasetBundle(
+            dataset_id="complex-path-demo",
+            dataset_name="Complex Path + Backup Demo",
+            source_type="sample_complex_path",
+            tool_groups=tool_groups,
+            routes=routes,
+            oee=oee,
+            demand=demand,
+            wip_lot_detail=wip_lot_detail,
+            products=products,
+            tool_master=tool_master,
+            process_master=process_master,
+            tool_process_capability=tool_process_capability,
+            backup_path=backup_path,
         )
 
     def list_datasets(self) -> list[dict[str, Any]]:
-        datasets = [self._bundle_summary(self._sample_bundle)]
+        datasets = [self._bundle_summary(self._sample_bundle), self._bundle_summary(self._complex_path_bundle)]
         datasets.extend(self._bundle_summary(bundle) for bundle in self._datasets.values())
         return datasets
 
     def get_dataset(self, dataset_id: str | None = None) -> DatasetBundle:
         if not dataset_id or dataset_id == "sample":
             return self._sample_bundle
+        if dataset_id == "complex-path-demo":
+            return self._complex_path_bundle
         if dataset_id not in self._datasets:
             raise KeyError(f"Unknown dataset_id: {dataset_id}")
         return self._datasets[dataset_id]
@@ -127,11 +305,36 @@ class DatasetRegistry:
             if missing_columns:
                 raise ValueError(f"Sheet '{sheet_name}' missing columns: {', '.join(missing_columns)}")
 
+        for sheet_name, required_columns in OPTIONAL_COMPLEX_PATH_SHEETS.items():
+            if sheet_name not in normalized:
+                continue
+            frame = normalized[sheet_name]
+            columns = set(frame.columns.astype(str))
+            missing_columns = sorted(required_columns - columns)
+            if missing_columns:
+                raise ValueError(f"Sheet '{sheet_name}' missing columns: {', '.join(missing_columns)}")
+
+        present_complex_sheets = {
+            sheet_name
+            for sheet_name in COMPLEX_PATH_SHEET_NAMES
+            if sheet_name in normalized and not normalized[sheet_name].dropna(how="all").empty
+        }
+        if present_complex_sheets and present_complex_sheets != COMPLEX_PATH_SHEET_NAMES:
+            missing_complex_sheets = sorted(COMPLEX_PATH_SHEET_NAMES - present_complex_sheets)
+            raise ValueError(
+                "Complex path import requires a complete sheet set. "
+                f"Missing or empty sheets: {', '.join(missing_complex_sheets)}"
+            )
+
         routes = normalized["route_master"].copy()
         tool_groups = normalized["tool_groups"].copy()
         oee = normalized["oee"].copy()
         demand = normalized["demand_plan"].copy()
         wip_lot_detail = normalized["wip_lot_detail"].copy()
+        tool_master = normalized.get("tool_master", pd.DataFrame()).copy()
+        process_master = normalized.get("process_master", pd.DataFrame()).copy()
+        tool_process_capability = normalized.get("tool_process_capability", pd.DataFrame()).copy()
+        backup_path = normalized.get("backup_path", pd.DataFrame()).copy()
 
         routes["step_seq"] = pd.to_numeric(routes["step_seq"], errors="coerce").fillna(0).astype(int)
         routes["run_time_hr"] = pd.to_numeric(routes["run_time_hr"], errors="coerce").fillna(0.0)
@@ -152,6 +355,20 @@ class DatasetRegistry:
             wip_lot_detail["remaining_wait_hours"] = pd.to_numeric(wip_lot_detail["remaining_wait_hours"], errors="coerce").fillna(0.0)
         if "hold_release_date" in wip_lot_detail.columns:
             wip_lot_detail["hold_release_date"] = pd.to_datetime(wip_lot_detail["hold_release_date"], errors="coerce")
+        if not tool_master.empty:
+            for col in ["uptime", "loss_time"]:
+                if col in tool_master.columns:
+                    tool_master[col] = pd.to_numeric(tool_master[col], errors="coerce").fillna(0.0)
+        if not process_master.empty and "process_seq" in process_master.columns:
+            process_master["process_seq"] = pd.to_numeric(process_master["process_seq"], errors="coerce").fillna(0).astype(int)
+        if not tool_process_capability.empty:
+            tool_process_capability["can_run"] = tool_process_capability["can_run"].map(_coerce_bool)
+            for col in ["run_time_hr", "batch_size", "visit_count", "switch_cost"]:
+                if col in tool_process_capability.columns:
+                    default = 1.0 if col in {"batch_size", "visit_count"} else 0.0
+                    tool_process_capability[col] = pd.to_numeric(tool_process_capability[col], errors="coerce").fillna(default)
+        if not backup_path.empty and "switch_cost" in backup_path.columns:
+            backup_path["switch_cost"] = pd.to_numeric(backup_path["switch_cost"], errors="coerce").fillna(0.0)
 
         product_ids = sorted(set(routes["product_id"].astype(str)) | set(demand["product_id"].astype(str)))
         products = pd.DataFrame(
@@ -175,6 +392,10 @@ class DatasetRegistry:
             demand=demand,
             wip_lot_detail=wip_lot_detail,
             products=products,
+            tool_master=tool_master,
+            process_master=process_master,
+            tool_process_capability=tool_process_capability,
+            backup_path=backup_path,
         )
         self._datasets[dataset_id] = bundle
         return self._bundle_summary(bundle)
@@ -308,11 +529,125 @@ class DatasetRegistry:
     def get_wip_lot_detail_payload(self, dataset_id: str | None = None) -> dict[str, Any]:
         bundle = self.get_dataset(dataset_id)
         wip_df = bundle.wip_lot_detail.copy()
+        wip_df = wip_df.replace({pd.NA: None}).where(pd.notnull(wip_df), None)
         return {
             "dataset_id": bundle.dataset_id,
             "n_wip_lots": int(len(wip_df)),
             "total_wip_wafers": float(wip_df["wafer_count"].sum()) if "wafer_count" in wip_df.columns else 0.0,
             "records": wip_df.to_dict(orient="records"),
+        }
+
+    def get_complex_path_payload(
+        self,
+        dataset_id: str | None = None,
+        days_in_month: float = 30.0,
+    ) -> dict[str, Any]:
+        """Build the scenario/allocation payload from optional tool-level path sheets."""
+        bundle = self.get_dataset(dataset_id)
+        capability = bundle.tool_process_capability.copy() if bundle.tool_process_capability is not None else pd.DataFrame()
+        if capability.empty:
+            raise ValueError("Dataset has no tool_process_capability sheet; complex path payload is unavailable")
+
+        capability = capability[capability["can_run"].map(_coerce_bool)]
+        if "visit_count" not in capability.columns:
+            capability["visit_count"] = 1.0
+        capability["visit_count"] = pd.to_numeric(capability["visit_count"], errors="coerce").fillna(1.0)
+        capability["batch_size"] = pd.to_numeric(capability["batch_size"], errors="coerce").fillna(1.0).clip(lower=1.0)
+        capability["run_time_hr"] = pd.to_numeric(capability["run_time_hr"], errors="coerce").fillna(0.0)
+        capability["unit_hours"] = capability["run_time_hr"] * capability["visit_count"] / capability["batch_size"]
+
+        products = sorted(capability["product_id"].astype(str).unique().tolist())
+        tools = sorted(capability["tool_id"].astype(str).unique().tolist())
+        if bundle.process_master is not None and not bundle.process_master.empty:
+            process_master = bundle.process_master.copy().sort_values("process_seq")
+            processes = process_master["process_id"].astype(str).tolist()
+        else:
+            processes = sorted(capability["process_id"].astype(str).unique().tolist())
+
+        feasibility: dict[str, dict[str, dict[str, bool]]] = {
+            p: {t: {s: False for s in processes} for t in tools}
+            for p in products
+        }
+        tc_matrix: dict[str, dict[str, dict[str, float]]] = {
+            p: {t: {s: 0.0 for s in processes} for t in tools}
+            for p in products
+        }
+
+        grouped = (
+            capability.groupby(["product_id", "tool_id", "process_id"], as_index=False)["unit_hours"]
+            .sum()
+        )
+        for _, row in grouped.iterrows():
+            product_id = str(row["product_id"])
+            tool_id = str(row["tool_id"])
+            process_id = str(row["process_id"])
+            if product_id not in feasibility or tool_id not in feasibility[product_id]:
+                continue
+            feasibility[product_id][tool_id][process_id] = True
+            tc_matrix[product_id][tool_id][process_id] = float(row["unit_hours"])
+
+        available_hours = self._build_tool_available_hours(bundle, tools, days_in_month)
+        backup_tools: dict[str, list[str]] = {}
+        backup_path = bundle.backup_path.copy() if bundle.backup_path is not None else pd.DataFrame()
+        if not backup_path.empty:
+            for _, row in backup_path.iterrows():
+                primary = str(row["primary_tool_id"])
+                backup = str(row["backup_tool_id"])
+                if primary and backup:
+                    backup_tools.setdefault(primary, [])
+                    if backup not in backup_tools[primary]:
+                        backup_tools[primary].append(backup)
+
+        return {
+            "dataset_id": bundle.dataset_id,
+            "products": products,
+            "tools": tools,
+            "processes": processes,
+            "feasibility": feasibility,
+            "tc_matrix": tc_matrix,
+            "available_hours": available_hours,
+            "backup_tools": backup_tools,
+            "metadata": {
+                "days_in_month": days_in_month,
+                "n_capability_records": int(len(capability)),
+                "n_backup_paths": int(len(backup_path)),
+                "tc_unit": "hours_per_wafer",
+            },
+        }
+
+    def _build_tool_available_hours(
+        self,
+        bundle: DatasetBundle,
+        tools: list[str],
+        days_in_month: float,
+    ) -> dict[str, float]:
+        tool_master = bundle.tool_master.copy() if bundle.tool_master is not None else pd.DataFrame()
+        if not tool_master.empty:
+            available_hours: dict[str, float] = {}
+            for _, row in tool_master.iterrows():
+                tool_id = str(row["tool_id"])
+                if tool_id not in tools:
+                    continue
+                uptime = float(row.get("uptime", 0.90) or 0.90)
+                loss_time = float(row.get("loss_time", 0.0) or 0.0)
+                available_hours[tool_id] = max(0.0, 24.0 * days_in_month * (uptime - loss_time))
+            return {tool_id: available_hours.get(tool_id, 0.0) for tool_id in tools}
+
+        latest_oee = bundle.oee.copy()
+        latest_oee["fact_date"] = pd.to_datetime(latest_oee["fact_date"], errors="coerce")
+        latest_date = latest_oee["fact_date"].max()
+        latest_oee = latest_oee[latest_oee["fact_date"] == latest_date]
+        group_hours = {
+            str(row["tool_group_id"]): float(row.get("available_hours", 0.0) or 0.0) * days_in_month
+            for _, row in latest_oee.iterrows()
+        }
+        group_machine_count = {
+            str(row["tool_group_id"]): max(1, int(row.get("n_machines", 1) or 1))
+            for _, row in bundle.tool_groups.iterrows()
+        }
+        return {
+            tool_id: group_hours.get(tool_id, 0.0) / group_machine_count.get(tool_id, 1)
+            for tool_id in tools
         }
 
     def _resolve_time_window(self, time_window: str, available_windows: list[str]) -> str:
@@ -341,43 +676,85 @@ class DatasetRegistry:
             "n_oee_records": int(len(bundle.oee)),
             "n_demand_records": int(len(bundle.demand)),
             "n_wip_lots": int(len(bundle.wip_lot_detail)),
+            "n_tools": int(len(bundle.tool_master)) if bundle.tool_master is not None else 0,
+            "n_processes": int(len(bundle.process_master)) if bundle.process_master is not None else 0,
+            "n_capability_records": int(len(bundle.tool_process_capability)) if bundle.tool_process_capability is not None else 0,
+            "n_backup_paths": int(len(bundle.backup_path)) if bundle.backup_path is not None else 0,
+            "complex_path_ready": bool(
+                bundle.tool_master is not None and not bundle.tool_master.empty
+                and bundle.process_master is not None and not bundle.process_master.empty
+                and bundle.tool_process_capability is not None and not bundle.tool_process_capability.empty
+            ),
         }
 
 
 DATASET_REGISTRY = DatasetRegistry()
 
 
+def _coerce_bool(value: Any) -> bool:
+    text = str(value).strip().lower()
+    return text in {"1", "true", "t", "yes", "y", "v", "可跑", "可以"}
+
+
 def generate_excel_template() -> bytes:
     """
     生成 Excel 导入模板文件
     
-    包含5个Sheet: route_master, tool_groups, oee, demand_plan, wip_lot_detail
-    每个Sheet包含必需字段标题和示例数据行
+    通用版模板固定包含 5 个基础必填 Sheet + 4 个复杂 Path/Backup Sheet。
     """
+    # Sheet 0: README / 字段字典
+    readme_df = pd.DataFrame([
+        {"sheet_name": "route_master", "required": "Y", "scope": "基础RCCP/路线", "description": "产品-路径-工序-机台组路线；用于RCCP、WIP后续负载、生产计划。"},
+        {"sheet_name": "tool_groups", "required": "Y", "scope": "基础RCCP/产能", "description": "机台组主数据；用于机台组可用产能与瓶颈分析。"},
+        {"sheet_name": "oee", "required": "Y", "scope": "基础RCCP/产能", "description": "按日期和机台组维护 OEE/可用小时；R6月度建议覆盖整月。"},
+        {"sheet_name": "demand_plan", "required": "Y", "scope": "R6/MPS需求", "description": "按时间窗口维护产品投片需求；正式R6建议使用 R6-YYYY-MM。"},
+        {"sheet_name": "wip_lot_detail", "required": "Y", "scope": "WIP口径", "description": "Lot级WIP状态；用于WIP后续工序负载与Output视角。"},
+        {"sheet_name": "tool_master", "required": "N*", "scope": "复杂Path", "description": "单台设备主数据。若启用复杂Path，4张复杂Path表必须一起填写。"},
+        {"sheet_name": "process_master", "required": "N*", "scope": "复杂Path", "description": "统一制程主数据与顺序。"},
+        {"sheet_name": "tool_process_capability", "required": "N*", "scope": "复杂Path", "description": "产品-制程-单台设备可跑能力矩阵，核心输入。"},
+        {"sheet_name": "backup_path", "required": "N*", "scope": "复杂Path/Backup", "description": "主设备到Backup设备的替代关系。"},
+    ])
+
+    field_dictionary_df = pd.DataFrame([
+        {"sheet_name": "tool_process_capability", "field_name": "product_id", "required": "Y", "description": "产品编码，需与 demand_plan/route_master 一致。"},
+        {"sheet_name": "tool_process_capability", "field_name": "process_id", "required": "Y", "description": "制程编码，需在 process_master 中维护。"},
+        {"sheet_name": "tool_process_capability", "field_name": "tool_id", "required": "Y", "description": "单台设备编码，需在 tool_master 中维护。"},
+        {"sheet_name": "tool_process_capability", "field_name": "can_run", "required": "Y", "description": "是否可跑，支持 TRUE/FALSE、1/0、可跑/不可跑。"},
+        {"sheet_name": "tool_process_capability", "field_name": "run_time_hr", "required": "Y", "description": "该产品在该设备上执行该制程的小时/批。"},
+        {"sheet_name": "tool_process_capability", "field_name": "batch_size", "required": "Y", "description": "批次片数；单片设备填 1。"},
+        {"sheet_name": "tool_process_capability", "field_name": "visit_count", "required": "N", "description": "重复访问次数；默认 1。"},
+        {"sheet_name": "tool_process_capability", "field_name": "path_type", "required": "N", "description": "primary/backup/alternate，用于展示和审查。"},
+        {"sheet_name": "backup_path", "field_name": "primary_tool_id", "required": "Y", "description": "主设备编码。"},
+        {"sheet_name": "backup_path", "field_name": "backup_tool_id", "required": "Y", "description": "Backup设备编码。"},
+        {"sheet_name": "backup_path", "field_name": "process_id", "required": "Y", "description": "适用制程。"},
+        {"sheet_name": "backup_path", "field_name": "enable_rule", "required": "Y", "description": "启用规则，例如 primary_overload / primary_down。"},
+        {"sheet_name": "backup_path", "field_name": "switch_cost", "required": "N", "description": "切换成本/效率损失，可填 0-1。"},
+    ])
+
     # Sheet 1: route_master (产品工艺路线)
     route_master_data = {
-        "product_id": ["28nm_DRAM_A", "28nm_DRAM_A", "28nm_DRAM_A", "28nm_DRAM_A", "28nm_DRAM_A"],
-        "path_id": ["default", "default", "default", "default", "default"],
-        "step_seq": [1, 2, 3, 4, 5],
-        "tool_group_id": ["LITHO_01", "ETCH_03", "DEPO_02", "LITHO_01", "WET_05"],
-        "run_time_hr": [0.45, 0.32, 0.28, 0.45, 0.15],
-        "batch_size": [1, 1, 25, 1, 100],
+        "product_id": ["DRAM_A", "DRAM_A", "DRAM_A", "DRAM_A", "DRAM_A", "NAND_B", "NAND_B", "NAND_B", "NAND_B", "NAND_B"],
+        "path_id": ["DRAM_MAIN", "DRAM_MAIN", "DRAM_MAIN", "DRAM_MAIN", "DRAM_MAIN", "NAND_ALT", "NAND_ALT", "NAND_ALT", "NAND_ALT", "NAND_ALT"],
+        "step_seq": [10, 20, 30, 40, 50, 10, 20, 30, 40, 50],
+        "tool_group_id": ["LITHO_MAIN", "ETCH_A", "DEPO_A", "LITHO_MAIN", "CMP_A", "LITHO_BACKUP", "DEPO_A", "ETCH_A", "LITHO_BACKUP", "CMP_A"],
+        "run_time_hr": [0.80, 0.55, 0.35, 0.90, 0.30, 0.70, 0.50, 0.70, 0.75, 0.40],
+        "batch_size": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
         # 可选字段示例
-        "step_name": ["光刻步骤1", "刻蚀步骤1", "薄膜沉积", "光刻步骤2", "清洗"],
-        "visit_count": [1, 1, 1, 1, 1],
-        "route_version": ["current", "current", "current", "current", "current"],
+        "step_name": ["首层光刻", "关键刻蚀", "薄膜沉积", "二次光刻", "CMP平坦化", "首层光刻", "薄膜沉积", "关键刻蚀", "二次光刻", "CMP平坦化"],
+        "visit_count": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        "route_version": ["current"] * 10,
     }
     route_master_df = pd.DataFrame(route_master_data)
     
     # Sheet 2: tool_groups (机台组信息)
     tool_groups_data = {
-        "tool_group_id": ["LITHO_01", "ETCH_03", "DEPO_02", "CMP_01", "WET_05"],
-        "tool_group_name": ["光刻机台01", "刻蚀机台03", "薄膜机台02", "抛光机台01", "清洗机台05"],
-        "area": ["LITHO", "ETCH", "DEPO", "CMP", "WET"],
-        "n_machines": [8, 12, 6, 4, 8],
-        "nameplate_throughput_wph": [2.5, 3.2, 4.5, 2.8, 6.0],
+        "tool_group_id": ["LITHO_MAIN", "LITHO_BACKUP", "ETCH_A", "DEPO_A", "CMP_A"],
+        "tool_group_name": ["ArF光刻主线", "ArF光刻Backup", "刻蚀A线", "薄膜A线", "CMP共享线"],
+        "area": ["LITHO", "LITHO", "ETCH", "DEPO", "CMP"],
+        "n_machines": [1, 1, 1, 1, 1],
+        "nameplate_throughput_wph": [1.2, 1.0, 1.6, 2.0, 1.8],
         # 可选字段示例
-        "process_type": ["光刻", "刻蚀", "薄膜沉积", "CMP抛光", "湿法清洗"],
+        "process_type": ["光刻", "光刻", "刻蚀", "薄膜沉积", "CMP抛光"],
         "is_active": [True, True, True, True, True],
     }
     tool_groups_df = pd.DataFrame(tool_groups_data)
@@ -388,18 +765,18 @@ def generate_excel_template() -> bytes:
     for day_offset in range(7):
         date = base_date + pd.Timedelta(days=day_offset)
         for tg_id, base_avail, base_perf, base_qual in [
-            ("LITHO_01", 0.88, 0.92, 0.98),
-            ("ETCH_03", 0.90, 0.95, 0.99),
-            ("DEPO_02", 0.87, 0.93, 0.97),
-            ("CMP_01", 0.85, 0.90, 0.96),
-            ("WET_05", 0.92, 0.94, 0.98),
+            ("LITHO_MAIN", 0.75, 0.95, 0.99),
+            ("LITHO_BACKUP", 0.70, 0.95, 0.99),
+            ("ETCH_A", 0.83, 0.95, 0.99),
+            ("DEPO_A", 0.79, 0.95, 0.99),
+            ("CMP_A", 0.88, 0.95, 0.99),
         ]:
             # 添加一些随机波动
             avail = base_avail + (day_offset % 3 - 1) * 0.02
             perf = base_perf + (day_offset % 2) * 0.01
             qual = base_qual
             oee = round(avail * perf * qual, 4)
-            n_machines_lookup = {"LITHO_01": 8, "ETCH_03": 12, "DEPO_02": 6, "CMP_01": 4, "WET_05": 8}
+            n_machines_lookup = {"LITHO_MAIN": 1, "LITHO_BACKUP": 1, "ETCH_A": 1, "DEPO_A": 1, "CMP_A": 1}
             available_hours = round(n_machines_lookup[tg_id] * 24 * avail, 2)
             oee_records.append({
                 "fact_date": date.date(),
@@ -414,45 +791,90 @@ def generate_excel_template() -> bytes:
     
     # Sheet 4: demand_plan (需求计划)
     demand_plan_data = {
-        "time_window": ["2026-W17", "2026-W17", "2026-W17", "2026-W18", "2026-W18", "2026-W18"],
-        "product_id": ["28nm_DRAM_A", "64L_NAND_B", "128L_NAND_A", "28nm_DRAM_A", "64L_NAND_B", "128L_NAND_A"],
-        "wafer_count": [1000, 800, 500, 1200, 900, 600],
+        "time_window": ["R6-2026-05", "R6-2026-05", "R6-2026-06", "R6-2026-06"],
+        "product_id": ["DRAM_A", "NAND_B", "DRAM_A", "NAND_B"],
+        "wafer_count": [620, 520, 560, 480],
         # 可选字段示例
-        "priority": [1, 2, 3, 1, 2, 3],
-        "contract_min": [600, 400, 200, 600, 400, 200],
-        "market_max": [1500, 1200, 800, 1500, 1200, 800],
-        "unit_profit": [150.0, 80.0, 120.0, 150.0, 80.0, 120.0],
-        "plan_version": ["v1.0", "v1.0", "v1.0", "v1.0", "v1.0", "v1.0"],
-        "release_status": ["frozen", "frozen", "frozen", "draft", "draft", "draft"],
-        "owner": ["MPS", "MPS", "MPS", "MPS", "MPS", "MPS"],
-        "approved_at": ["2026-04-25", "2026-04-25", "2026-04-25", "", "", ""],
+        "priority": [1, 2, 1, 2],
+        "contract_min": [420, 320, 380, 300],
+        "market_max": [760, 680, 720, 640],
+        "unit_profit": [150.0, 110.0, 150.0, 110.0],
+        "plan_version": ["R6", "R6", "R6", "R6"],
+        "release_status": ["frozen", "frozen", "draft", "draft"],
+        "owner": ["MPS", "MPS", "MPS", "MPS"],
+        "approved_at": ["2026-04-25", "2026-04-25", "", ""],
     }
     demand_plan_df = pd.DataFrame(demand_plan_data)
 
     # Sheet 5: wip_lot_detail (WIP Lot 明细)
     wip_lot_detail_data = {
-        "lot_id": ["LOT0001", "LOT0002", "LOT0003", "LOT0004"],
-        "product_id": ["28nm_DRAM_A", "64L_NAND_B", "128L_NAND_A", "28nm_DRAM_A"],
-        "current_step_seq": [3, 2, 4, 5],
-        "wafer_count": [25, 25, 25, 25],
-        "percent_complete": [35, 55, 78, 88],
+        "lot_id": ["CPWIP001", "CPWIP002", "CPWIP003", "CPWIP004"],
+        "product_id": ["DRAM_A", "DRAM_A", "NAND_B", "NAND_B"],
+        "current_step_seq": [20, 40, 10, 30],
+        "wafer_count": [80, 60, 90, 70],
+        "percent_complete": [35, 72, 20, 60],
         # 可选字段示例
-        "lot_status": ["WAIT", "RUN", "WAIT", "MOVE"],
-        "good_wafer_count": [24, 25, 24, 25],
-        "wait_hours_so_far": [12.0, 4.5, 26.0, 1.0],
-        "remaining_wait_hours": [0.0, 0.0, 12.0, 0.0],
+        "lot_status": ["RUN", "WAIT", "WAIT", "HOLD"],
+        "good_wafer_count": [78, 59, 88, 69],
+        "wait_hours_so_far": [5.0, 18.0, 12.0, 30.0],
+        "remaining_wait_hours": [0.0, 0.0, 0.0, 24.0],
         "hold_release_date": ["", "", "", ""],
-        "input_week": ["2026-W05", "2026-W06", "2026-W04", "2026-W05"],
+        "input_week": ["2026-W14", "2026-W15", "2026-W14", "2026-W15"],
     }
     wip_lot_detail_df = pd.DataFrame(wip_lot_detail_data)
+
+    # Sheet 6: tool_master (单机台主数据，复杂 path 推荐)
+    tool_master_df = pd.DataFrame({
+        "tool_id": ["LM_T01", "LB_T01", "EA_T01", "DA_T01", "CA_T01"],
+        "tool_group_id": ["LITHO_MAIN", "LITHO_BACKUP", "ETCH_A", "DEPO_A", "CMP_A"],
+        "tool_name": ["ArF主线-01", "ArF备援-01", "刻蚀A-01", "薄膜A-01", "CMP-01"],
+        "status": ["RUN", "RUN", "RUN", "RUN", "RUN"],
+        "uptime": [0.75, 0.70, 0.83, 0.79, 0.88],
+        "loss_time": [0.05, 0.05, 0.03, 0.03, 0.04],
+    })
+
+    # Sheet 7: process_master (制程主数据，复杂 path 推荐)
+    process_master_df = pd.DataFrame({
+        "process_id": ["PHOTO_1", "ETCH_1", "DEPO_1", "PHOTO_2", "CMP_1"],
+        "process_name": ["首层光刻", "关键刻蚀", "薄膜沉积", "二次光刻", "CMP平坦化"],
+        "process_seq": [10, 20, 30, 40, 50],
+        "area": ["LITHO", "ETCH", "DEPO", "LITHO", "CMP"],
+    })
+
+    # Sheet 8: tool_process_capability (产品-制程-机台能力矩阵，复杂 path 推荐)
+    tool_process_capability_df = pd.DataFrame({
+        "product_id": ["DRAM_A", "DRAM_A", "DRAM_A", "DRAM_A", "DRAM_A", "DRAM_A", "DRAM_A", "NAND_B", "NAND_B", "NAND_B", "NAND_B", "NAND_B"],
+        "process_id": ["PHOTO_1", "PHOTO_1", "ETCH_1", "DEPO_1", "PHOTO_2", "PHOTO_2", "CMP_1", "PHOTO_1", "ETCH_1", "DEPO_1", "PHOTO_2", "CMP_1"],
+        "tool_id": ["LM_T01", "LB_T01", "EA_T01", "DA_T01", "LM_T01", "LB_T01", "CA_T01", "LB_T01", "EA_T01", "DA_T01", "LB_T01", "CA_T01"],
+        "can_run": [True] * 12,
+        "run_time_hr": [0.80, 1.05, 0.55, 0.35, 0.90, 1.10, 0.30, 0.70, 0.70, 0.50, 0.75, 0.40],
+        "batch_size": [1] * 12,
+        "path_type": ["primary", "backup", "primary", "primary", "primary", "backup", "primary", "primary", "primary", "primary", "primary", "primary"],
+        "visit_count": [1] * 12,
+    })
+
+    # Sheet 9: backup_path (backup 替代路径，复杂 path 推荐)
+    backup_path_df = pd.DataFrame({
+        "primary_tool_id": ["LM_T01", "LM_T01"],
+        "backup_tool_id": ["LB_T01", "LB_T01"],
+        "process_id": ["PHOTO_1", "PHOTO_2"],
+        "enable_rule": ["primary_overload", "primary_overload"],
+        "switch_cost": [0.08, 0.10],
+    })
     
     # 写入 Excel 文件
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        readme_df.to_excel(writer, sheet_name="README", index=False)
+        field_dictionary_df.to_excel(writer, sheet_name="field_dictionary", index=False)
         route_master_df.to_excel(writer, sheet_name="route_master", index=False)
         tool_groups_df.to_excel(writer, sheet_name="tool_groups", index=False)
         oee_df.to_excel(writer, sheet_name="oee", index=False)
         demand_plan_df.to_excel(writer, sheet_name="demand_plan", index=False)
         wip_lot_detail_df.to_excel(writer, sheet_name="wip_lot_detail", index=False)
+        tool_master_df.to_excel(writer, sheet_name="tool_master", index=False)
+        process_master_df.to_excel(writer, sheet_name="process_master", index=False)
+        tool_process_capability_df.to_excel(writer, sheet_name="tool_process_capability", index=False)
+        backup_path_df.to_excel(writer, sheet_name="backup_path", index=False)
     
     return output.getvalue()

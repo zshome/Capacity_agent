@@ -62,9 +62,8 @@ try:
         AllocationInput,
         AllocationObjective,
         allocate,
-        PYOMO_AVAILABLE as ALLOCATION_PYOMO_AVAILABLE,
     )
-    ALLOCATION_AVAILABLE = ALLOCATION_PYOMO_AVAILABLE
+    ALLOCATION_AVAILABLE = True
 except ImportError:
     ALLOCATION_AVAILABLE = False
     AllocationInput = None
@@ -309,6 +308,23 @@ def data_wip_lot_detail(dataset_id: str | None = None):
         raise HTTPException(404, str(e))
     except Exception as e:
         logger.exception("data_wip_lot_detail failed")
+        raise HTTPException(500, str(e))
+
+
+@app.get("/data/complex_path_payload")
+def data_complex_path_payload(
+    dataset_id: str | None = None,
+    days_in_month: float = 30.0,
+):
+    """Build scenario/allocation input from tool-level complex Path/Backup sheets."""
+    try:
+        return DATASET_REGISTRY.get_complex_path_payload(dataset_id, days_in_month)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.exception("data_complex_path_payload failed")
         raise HTTPException(500, str(e))
 
 
@@ -857,18 +873,11 @@ class AllocationRequest(BaseModel):
 @app.post("/allocation/optimize")
 def allocation_optimize(req: AllocationRequest):
     """
-    分配优化模型（情景2-4）
+    分配优化模型（情景4-5：不同 Path / Backup）
     
-    算法: 窃举+约束+分配
-    适用: 多机台/不同配置场景
+    算法: 穷举+约束+分配
+    适用: 多机台/不同 Path/Backup 配置场景
     """
-    if not ALLOCATION_AVAILABLE:
-        return {
-            "status": "unavailable",
-            "error": "Pyomo not installed. Allocation optimization requires Pyomo + CBC solver.",
-            "recommendation": "Install with: pip install pyomo",
-            "alternative": "Use RCCP for basic capacity analysis or contact admin to install Pyomo."
-        }
     try:
         inp = AllocationInput(
             products=req.products,
@@ -878,7 +887,10 @@ def allocation_optimize(req: AllocationRequest):
             tc_matrix=req.tc_matrix,
             available_hours=req.available_hours,
             demand_target=req.demand_target,
+            backup_tools=req.backup_tools,
             objective=AllocationObjective(req.objective),
+            solver=req.solver,
+            time_limit_seconds=req.time_limit_seconds,
         )
         result = allocate(inp)
         return result.to_dict()
@@ -994,7 +1006,6 @@ def capacity_unified_analyze(req: UnifiedCapacityRequest):
                     available_hours=req.available_hours,
                     demand_target=req.demand_plan,
                     backup_tools=req.backup_tools,
-                    path_mix=req.path_mix,
                     objective=AllocationObjective.MAX_OUTPUT,
                     solver=req.solver,
                 )

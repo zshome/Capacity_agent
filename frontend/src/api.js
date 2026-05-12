@@ -21,6 +21,8 @@ export const api = {
   listDatasets: () => request(`${ENGINE_BASE}/data/datasets`),
   datasetSummary: (datasetId) => request(`${ENGINE_BASE}/data/dataset_summary?dataset_id=${encodeURIComponent(datasetId)}`),
   wipLotDetail: (datasetId) => request(`${ENGINE_BASE}/data/wip_lot_detail?dataset_id=${encodeURIComponent(datasetId)}`),
+  complexPathPayload: (datasetId) =>
+    request(`${ENGINE_BASE}/data/complex_path_payload?dataset_id=${encodeURIComponent(datasetId)}`),
   importExcel: async (file) => {
     const formData = new FormData();
     formData.append("file", file);

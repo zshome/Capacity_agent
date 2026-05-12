@@ -258,22 +258,40 @@ function App() {
       const toolGroups = statusResponse.tool_groups || [];
       const capacityMatrix = matrixResponse.capacity_matrix || {};
       const demandPlan = demandResponse.demand_plan || {};
+      let complexPathPayload = null;
+      if (datasetSummary?.complex_path_ready) {
+        try {
+          complexPathPayload = await api.complexPathPayload(datasetId);
+        } catch (e) {
+          console.warn("Complex path payload failed:", e.message || e);
+        }
+      }
 
       // NEW: Classify scenario
       const products = Object.keys(demandPlan);
       const toolGroupIds = Object.keys(availableHours);
-      const processSteps = datasetSummary?.process_steps || ["Step_1", "Step_2", "Step_3"];
-      
-      // 只有在有产品和机台数据时才进行情景分类
-      if (products.length > 0 && toolGroupIds.length > 0) {
-        try {
-          const scenarioResult = await api.classifyScenario({
+      const processSteps = complexPathPayload?.processes || datasetSummary?.process_steps || ["Step_1", "Step_2", "Step_3"];
+      const scenarioRequest = complexPathPayload
+        ? {
+            products: complexPathPayload.products,
+            tool_groups: complexPathPayload.tools,
+            process_steps: complexPathPayload.processes,
+            feasibility_matrix: complexPathPayload.feasibility,
+            tc_matrix: complexPathPayload.tc_matrix,
+            backup_tools: complexPathPayload.backup_tools
+          }
+        : {
             products,
             tool_groups: toolGroupIds,
             process_steps: processSteps,
             feasibility_matrix: {},
-            tc_matrix: {},  // 暂不传递tc_matrix，避免格式不匹配
-          });
+            tc_matrix: {}
+          };
+      
+      // 只有在有产品和机台数据时才进行情景分类
+      if (scenarioRequest.products.length > 0 && scenarioRequest.tool_groups.length > 0) {
+        try {
+          const scenarioResult = await api.classifyScenario(scenarioRequest);
           setScenarioInfo(scenarioResult);
         } catch (e) {
           console.warn("Scenario classification failed:", e.message || e);
@@ -323,6 +341,27 @@ function App() {
           time_limit_seconds: lpConfig.timeLimit,
           time_window: timeWindow
         });
+      }
+
+      let allocation = null;
+      if (complexPathPayload) {
+        try {
+          allocation = await api.optimizeAllocation({
+            products: complexPathPayload.products,
+            tools: complexPathPayload.tools,
+            processes: complexPathPayload.processes,
+            feasibility: complexPathPayload.feasibility,
+            tc_matrix: complexPathPayload.tc_matrix,
+            available_hours: complexPathPayload.available_hours,
+            demand_target: demandPlan,
+            backup_tools: complexPathPayload.backup_tools,
+            objective: "max_output",
+            solver: lpConfig.solver,
+            time_limit_seconds: lpConfig.timeLimit
+          });
+        } catch (e) {
+          console.warn("Allocation optimization failed:", e.message || e);
+        }
       }
 
       let des = null;
@@ -392,6 +431,8 @@ function App() {
         rccp,
         bottleneck,
         lp,
+        allocation,
+        complexPathPayload,
         des
       });
 
@@ -561,14 +602,14 @@ function App() {
           <div className="control-grid upload-grid">
             <label className="upload-drop">
               <input type="file" accept=".xlsx,.xls" onChange={handleUpload} />
-              <strong>{uploading ? "导入中..." : "导入 Excel 工作簿（5 个必填 Sheet）"}</strong>
-              <span>需包含 `route_master`、`tool_groups`、`oee`、`demand_plan`、`wip_lot_detail`。`demand_plan` 需带 R6 版本/发布状态，`wip_lot_detail` 需带 Lot 状态用于 WIP 分摊。</span>
+              <strong>{uploading ? "导入中..." : "导入通用 Excel 工作簿"}</strong>
+              <span>通用版包含 5 张基础必填表 + 4 张复杂 Path 表。若填写复杂 Path 任一表，需同时补齐 `tool_master`、`process_master`、`tool_process_capability`、`backup_path`。</span>
             </label>
             <div className="control-actions-group">
               <button className="secondary-button" onClick={() => api.downloadExcelTemplate()}>
                 下载 Excel 模板
               </button>
-              <p className="muted">建议先下载最新模板，按 5 个必填 sheet 填充后再导入。</p>
+              <p className="muted">模板已统一为通用版本：含 README、字段字典、R6/WIP、复杂 Path/Backup 示例，可直接用于导入校验。</p>
             </div>
           </div>
           {datasetSummary ? (
@@ -577,6 +618,10 @@ function App() {
               <MetricCard label="机台组" value={datasetSummary.n_tool_groups} hint="用于产能与瓶颈计算" />
               <MetricCard label="路线行数" value={datasetSummary.n_routes} hint="route master 明细规模" />
               <MetricCard label="WIP Lot" value={datasetSummary.n_wip_lots || 0} hint="含 lot_status / 等待时间字段" />
+              <MetricCard label="机台明细" value={datasetSummary.n_tools || 0} hint="tool_master，用于单台能力" />
+              <MetricCard label="制程数" value={datasetSummary.n_processes || 0} hint="process_master 顺序" />
+              <MetricCard label="能力矩阵" value={datasetSummary.n_capability_records || 0} hint="产品-制程-机台可跑关系" />
+              <MetricCard label="Backup" value={datasetSummary.n_backup_paths || 0} hint={datasetSummary.complex_path_ready ? "复杂 Path 已就绪" : "未启用复杂 Path"} />
             </div>
           ) : null}
           {analysis?.demandResponse ? (
@@ -657,6 +702,21 @@ function App() {
                 ) : (
                   <div className="empty-state">运行完整分析后，这里会给出情景识别建议。</div>
                 )}
+                {analysis?.allocation ? (
+                  <div className="result-card" style={{ marginTop: "12px" }}>
+                    <h3>复杂 Path 分配结果</h3>
+                    <p>
+                      <StatusPill label={analysis.allocation.status} tone={analysis.allocation.status === "optimal" ? "ok" : "warn"} />
+                      <span style={{ marginLeft: "8px" }}>
+                        完整可承诺量: <strong>{formatNumber(Object.values(analysis.allocation.product_output || {}).reduce((sum, qty) => sum + qty, 0))}</strong> wafers
+                      </span>
+                    </p>
+                    <p className="muted">
+                      口径：产品完成量必须覆盖全部制程；当前方法 {analysis.allocation.metadata?.method || "allocation"}，
+                      {analysis.allocation.metadata?.decision_quality === "solver_optimized" ? "可作为求解器优化结果复核。" : "需再用正式 LP/CBC 求解器复核后进入冻结承诺。"}
+                    </p>
+                  </div>
+                ) : null}
                 <div className="result-card" style={{ marginTop: "12px" }}>
                   <h3>建议下一步</h3>
                   <p className="muted">

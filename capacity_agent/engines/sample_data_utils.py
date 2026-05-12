@@ -209,15 +209,25 @@ def ensure_sample_files(out_dir: Path) -> SampleDataset:
         out_dir / "fact_demand_plan.parquet",
     ]
     if all(path.exists() for path in parquet_files):
-        return load_sample_files(out_dir)
+        try:
+            return load_sample_files(out_dir)
+        except ImportError:
+            return load_sample_csv_files(out_dir)
 
     dataset = generate_sample_dataset()
-    dataset.tool_groups.to_parquet(out_dir / "dim_tool_group.parquet", index=False)
-    dataset.products.to_parquet(out_dir / "dim_product.parquet", index=False)
-    dataset.routes.to_parquet(out_dir / "dim_route.parquet", index=False)
-    dataset.oee.to_parquet(out_dir / "fact_oee_daily.parquet", index=False)
-    dataset.demand.to_parquet(out_dir / "fact_demand_plan.parquet", index=False)
+    try:
+        dataset.tool_groups.to_parquet(out_dir / "dim_tool_group.parquet", index=False)
+        dataset.products.to_parquet(out_dir / "dim_product.parquet", index=False)
+        dataset.routes.to_parquet(out_dir / "dim_route.parquet", index=False)
+        dataset.oee.to_parquet(out_dir / "fact_oee_daily.parquet", index=False)
+        dataset.demand.to_parquet(out_dir / "fact_demand_plan.parquet", index=False)
+    except ImportError:
+        pass
     dataset.tool_groups.to_csv(out_dir / "dim_tool_group.csv", index=False)
+    dataset.products.to_csv(out_dir / "dim_product.csv", index=False)
+    dataset.routes.to_csv(out_dir / "dim_route.csv", index=False)
+    dataset.oee.to_csv(out_dir / "fact_oee_daily.csv", index=False)
+    dataset.demand.to_csv(out_dir / "fact_demand_plan.csv", index=False)
     dataset.routes.head(50).to_csv(out_dir / "dim_route_sample.csv", index=False)
     return dataset
 
@@ -229,4 +239,29 @@ def load_sample_files(out_dir: Path) -> SampleDataset:
         routes=pd.read_parquet(out_dir / "dim_route.parquet"),
         oee=pd.read_parquet(out_dir / "fact_oee_daily.parquet"),
         demand=pd.read_parquet(out_dir / "fact_demand_plan.parquet"),
+    )
+
+
+def load_sample_csv_files(out_dir: Path) -> SampleDataset:
+    csv_files = [
+        out_dir / "dim_tool_group.csv",
+        out_dir / "dim_product.csv",
+        out_dir / "dim_route.csv",
+        out_dir / "fact_oee_daily.csv",
+        out_dir / "fact_demand_plan.csv",
+    ]
+    if not all(path.exists() for path in csv_files):
+        dataset = generate_sample_dataset()
+        dataset.tool_groups.to_csv(out_dir / "dim_tool_group.csv", index=False)
+        dataset.products.to_csv(out_dir / "dim_product.csv", index=False)
+        dataset.routes.to_csv(out_dir / "dim_route.csv", index=False)
+        dataset.oee.to_csv(out_dir / "fact_oee_daily.csv", index=False)
+        dataset.demand.to_csv(out_dir / "fact_demand_plan.csv", index=False)
+        return dataset
+    return SampleDataset(
+        tool_groups=pd.read_csv(out_dir / "dim_tool_group.csv"),
+        products=pd.read_csv(out_dir / "dim_product.csv"),
+        routes=pd.read_csv(out_dir / "dim_route.csv"),
+        oee=pd.read_csv(out_dir / "fact_oee_daily.csv"),
+        demand=pd.read_csv(out_dir / "fact_demand_plan.csv"),
     )

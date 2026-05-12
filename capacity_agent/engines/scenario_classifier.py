@@ -4,11 +4,12 @@ Scenario Classifier
 
 基于产能规则文档的情景分类判断模块
 
-情景定义:
-  情景1: 单台/相同Path → 标准产能计算
-  情景2: 多台/相同Path/有Backup → 穷举+约束+分配
-  情景3: 多台/不同Path/有Backup → 穷举+约束+分配  
-  情景4: 多台/不同Path/无Backup → 穷举+约束+分配
+情景定义（对齐公司产能计算方法）:
+  情景1: 多产品/单台/相同Path/Backup可有可无 → 标准产能计算
+  情景2: 多产品/多台/相同Path/无Backup → 标准产能计算
+  情景3: 多产品/多台/相同Path/有Backup → 标准产能计算
+  情景4: 多产品/多台/不同Path/无Backup → 分配模型
+  情景5: 多产品/多台/不同Path/有Backup → 分配模型，产能极大化
 
 判断逻辑:
   - multi_product: 是否多产品
@@ -25,10 +26,11 @@ from typing import Any
 
 class ScenarioType(str, Enum):
     """产能计算情景类型"""
-    SCENARIO_1_SIMPLE = "scenario_1"       # 标准产能计算
-    SCENARIO_2_SAME_PATH_BACKUP = "scenario_2"  # 穷举+约束+分配
-    SCENARIO_3_DIFF_PATH_BACKUP = "scenario_3"  # 穷举+约束+分配
-    SCENARIO_4_DIFF_PATH_NO_BACKUP = "scenario_4"  # 穷举+约束+分配
+    SCENARIO_1_SINGLE_TOOL = "scenario_1"       # 标准产能计算
+    SCENARIO_2_SAME_PATH_NO_BACKUP = "scenario_2"  # 标准产能计算
+    SCENARIO_3_SAME_PATH_BACKUP = "scenario_3"  # 标准产能计算
+    SCENARIO_4_DIFF_PATH_NO_BACKUP = "scenario_4"  # 分配模型
+    SCENARIO_5_DIFF_PATH_BACKUP = "scenario_5"  # 分配模型 + backup极大化
     FULL_FLEXIBLE = "full_flexible"  # 全适（所有机台可运行所有制程）
 
 
@@ -87,25 +89,8 @@ def classify_scenario(inp: ScenarioInput) -> ScenarioResult:
     # 2. 判断多机台
     multi_machine = len(inp.tool_groups) > 1
     
-    # 3. 判断是否相同Path
-    same_path = True
-    if inp.path_mix:
-        # 检查每个产品的path配置是否相同
-        path_configs = []
-        for product in inp.products:
-            if product in inp.path_mix:
-                paths = inp.path_mix[product]
-                path_configs.append(set(paths.keys()))
-            else:
-                path_configs.append({"default"})
-        
-        # 如果path配置不完全相同，则为不同Path
-        if len(set(tuple(sorted(p)) for p in path_configs)) > 1:
-            same_path = False
-        # 如果有多个path但配置相同，仍视为相同Path
-        elif any(len(p) > 1 for p in path_configs):
-            # 多path但相同配置，视为相同Path
-            pass
+    # 3. 判断是否相同Path。优先使用产品-机台-制程可行性矩阵；没有矩阵时再用 path_mix。
+    same_path = _is_same_path(inp)
     
     # 4. 判断是否有Backup
     has_backup = bool(inp.backup_tools)
@@ -142,32 +127,29 @@ def classify_scenario(inp: ScenarioInput) -> ScenarioResult:
         recommended_solver = "rccp"
     elif not multi_machine:
         # 单机台：情景1
-        scenario_type = ScenarioType.SCENARIO_1_SIMPLE
-        description = "情景1：单机台/相同Path → 标准产能计算"
+        scenario_type = ScenarioType.SCENARIO_1_SINGLE_TOOL
+        description = "情景1：多产品/单台/相同Path/Backup可有可无 → 标准产能计算"
         algorithm = "standard"
         recommended_solver = "rccp"
     elif same_path and not has_backup:
-        # 多机台/相同Path/无Backup：仍是情景1
-        scenario_type = ScenarioType.SCENARIO_1_SIMPLE
-        description = "情景1扩展：多机台/相同Path/无Backup → 标准产能计算"
+        scenario_type = ScenarioType.SCENARIO_2_SAME_PATH_NO_BACKUP
+        description = "情景2：多产品/多台/相同Path/无Backup → 标准产能计算"
         algorithm = "standard"
         recommended_solver = "rccp"
     elif same_path and has_backup:
-        # 情景2：多机台/相同Path/有Backup
-        scenario_type = ScenarioType.SCENARIO_2_SAME_PATH_BACKUP
-        description = "情景2：多机台/相同Path/有Backup → 穷举+约束+分配"
-        algorithm = "allocation_model"
-        recommended_solver = "allocation_lp"
+        scenario_type = ScenarioType.SCENARIO_3_SAME_PATH_BACKUP
+        description = "情景3：多产品/多台/相同Path/有Backup → 标准产能计算"
+        algorithm = "standard"
+        recommended_solver = "rccp"
     elif not same_path and has_backup:
-        # 情景3：多机台/不同Path/有Backup
-        scenario_type = ScenarioType.SCENARIO_3_DIFF_PATH_BACKUP
-        description = "情景3：多机台/不同Path/有Backup → 穷举+约束+分配"
+        scenario_type = ScenarioType.SCENARIO_5_DIFF_PATH_BACKUP
+        description = "情景5：多产品/多台/不同Path/有Backup → 分配模型，产能极大化"
         algorithm = "allocation_model"
         recommended_solver = "allocation_lp"
     else:
         # 情景4：多机台/不同Path/无Backup
         scenario_type = ScenarioType.SCENARIO_4_DIFF_PATH_NO_BACKUP
-        description = "情景4：多机台/不同Path/无Backup → 窃举+约束+分配"
+        description = "情景4：多产品/多台/不同Path/无Backup → 分配模型"
         algorithm = "allocation_model"
         recommended_solver = "allocation_lp"
     
@@ -206,6 +188,31 @@ def _summarize_feasibility(matrix: dict) -> dict:
         "feasible_combinations": feasible,
         "feasibility_rate": feasible / total if total > 0 else 0,
     }
+
+
+def _is_same_path(inp: ScenarioInput) -> bool:
+    """判断多台机台是否具备相同可加工 path。"""
+    if inp.feasibility_matrix and inp.process_steps and inp.tool_groups:
+        for product in inp.products:
+            tool_signatures: list[tuple[str, ...]] = []
+            product_matrix = inp.feasibility_matrix.get(product, {})
+            for tool in inp.tool_groups:
+                processes = product_matrix.get(tool, {})
+                signature = tuple(sorted(p for p in inp.process_steps if processes.get(p, False)))
+                tool_signatures.append(signature)
+            non_empty = [sig for sig in tool_signatures if sig]
+            if non_empty and len(set(non_empty)) > 1:
+                return False
+        return True
+
+    if inp.path_mix:
+        path_configs = []
+        for product in inp.products:
+            paths = inp.path_mix.get(product, {"default": 1.0})
+            path_configs.append(tuple(sorted(paths.keys())))
+        return len(set(path_configs)) <= 1
+
+    return True
 
 
 # ============================================================

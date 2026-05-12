@@ -2,7 +2,7 @@
 Allocation Model
 ================
 
-情景2-4的产能分配优化模型
+复杂 Path / Backup 场景的产能分配优化模型
 
 核心算法:
   1. 穷举可行分配方案
@@ -17,11 +17,12 @@ Allocation Model
 数学模型:
 
 决策变量:
-  x[p,t,s] = 产品p在机台t上制程s的分配量 (wafers)
+  y[p] = 产品p可完成的投片/产出量 (wafers)
+  x[p,t,s] = 产品p在机台t上制程s的加工量 (process-wafers)
 
 约束:
-  1. 制程约束: 每个产品必须完成所有制程
-  2. 机台约束: Σ_p x[p,t] ≤ capacity[t]
+  1. 制程约束: 每个产品完成量 y[p] 必须在所有制程均可被加工
+  2. 机台约束: Σ_p,s TC[p,t,s] * x[p,t,s] ≤ available_hours[t]
   3. 可行性约束: feasibility_matrix[p,t,s] = True 才允许分配
 
 目标:
@@ -48,6 +49,8 @@ try:
     PYOMO_AVAILABLE = True
 except ImportError:
     PYOMO_AVAILABLE = False
+
+ALLOCATION_AVAILABLE = True
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +108,13 @@ class AllocationResult:
         return {
             "status": self.status,
             "allocation": {p: {t: round(v, 1) for t, v in a.items()} for p, a in self.allocation.items()},
-            "process_allocation": {},
+            "process_allocation": {
+                p: {
+                    t: {s: round(v, 1) for s, v in steps.items()}
+                    for t, steps in tools.items()
+                }
+                for p, tools in self.process_allocation.items()
+            },
             "tool_utilization": {t: round(u, 2) for t, u in self.tool_utilization.items()},
             "product_output": {p: round(v, 1) for p, v in self.product_output.items()},
             "bottleneck_tools": self.bottleneck_tools,
@@ -141,7 +150,7 @@ def allocate(inp: AllocationInput) -> AllocationResult:
         return AllocationResult(
             status="no_feasible_combinations",
             allocation={p: {} for p in inp.products},
-            process_allocation={},
+            process_allocation={p: {} for p in inp.products},
             tool_utilization={t: 0.0 for t in inp.tools},
             product_output={p: 0.0 for p in inp.products},
             bottleneck_tools=[],
@@ -176,6 +185,7 @@ def _solve_lp(inp: AllocationInput, feasible_pairs: list, t0: datetime) -> Alloc
     
     # 决策变量
     m.x = pyo.Var(m.feasible_pairs, domain=pyo.NonNegativeReals)
+    m.y = pyo.Var(m.P, domain=pyo.NonNegativeReals)
     
     # 约束: 机台产能
     def tool_cap_rule(m, t):
@@ -186,10 +196,29 @@ def _solve_lp(inp: AllocationInput, feasible_pairs: list, t0: datetime) -> Alloc
         return total_hours <= inp.available_hours.get(t, 0.0)
     
     m.tool_cap = pyo.Constraint(m.T, rule=tool_cap_rule)
+
+    # 需求上限: 有 R6/MPS 目标时不允许为了“最大产能”虚增超需求产出。
+    def demand_cap_rule(m, p):
+        target = inp.demand_target.get(p, 0.0)
+        if target and target > 0:
+            return m.y[p] <= target
+        return pyo.Constraint.Skip
+
+    m.demand_cap = pyo.Constraint(m.P, rule=demand_cap_rule)
+
+    # 制程完成约束: 产品完成量必须在每一道制程上都被加工一次。
+    # 如果某产品某制程没有任何可行机台，则该产品完成量被压到 0，避免高估承诺。
+    def process_completion_rule(m, p, s):
+        feasible_tools = [t for (pp, t, ss) in feasible_pairs if pp == p and ss == s]
+        if not feasible_tools:
+            return m.y[p] == 0
+        return sum(m.x[(p, t, s)] for t in feasible_tools) == m.y[p]
+
+    m.process_completion = pyo.Constraint(m.P, m.S, rule=process_completion_rule)
     
     # 目标: 最大产出
     m.obj = pyo.Objective(
-        expr=sum(m.x[idx] for idx in m.feasible_pairs),
+        expr=sum(m.y[p] for p in m.P),
         sense=pyo.maximize
     )
     
@@ -205,6 +234,7 @@ def _solve_lp(inp: AllocationInput, feasible_pairs: list, t0: datetime) -> Alloc
     
     # 提取结果
     allocation: dict[str, dict[str, float]] = {p: {} for p in inp.products}
+    process_allocation: dict[str, dict[str, dict[str, float]]] = {p: {} for p in inp.products}
     tool_utilization: dict[str, float] = {}
     product_output: dict[str, float] = {p: 0.0 for p in inp.products}
     
@@ -214,9 +244,10 @@ def _solve_lp(inp: AllocationInput, feasible_pairs: list, t0: datetime) -> Alloc
             if t not in allocation[p]:
                 allocation[p][t] = 0.0
             allocation[p][t] += val
-    
+            process_allocation[p].setdefault(t, {})[s] = val
+
     for p in inp.products:
-        product_output[p] = sum(allocation[p].values())
+        product_output[p] = pyo.value(m.y[p]) or 0.0
     
     for t in inp.tools:
         used_hours = sum(
@@ -232,7 +263,7 @@ def _solve_lp(inp: AllocationInput, feasible_pairs: list, t0: datetime) -> Alloc
     return AllocationResult(
         status=status,
         allocation=allocation,
-        process_allocation={},
+        process_allocation=process_allocation,
         tool_utilization=tool_utilization,
         product_output=product_output,
         bottleneck_tools=bottleneck_tools,
@@ -240,32 +271,19 @@ def _solve_lp(inp: AllocationInput, feasible_pairs: list, t0: datetime) -> Alloc
         objective_value=pyo.value(m.obj) or 0.0,
         solve_time_seconds=(datetime.utcnow() - t0).total_seconds(),
         computed_at=datetime.utcnow(),
-        metadata={"solver": inp.solver, "method": "lp"},
+        metadata={
+            "solver": inp.solver,
+            "method": "lp",
+            "decision_quality": "solver_optimized",
+            "output_semantics": "product_output is completed wafers; allocation is process-wafer workload by tool",
+        },
     )
 
 
 def _solve_greedy(inp: AllocationInput, feasible_pairs: list, t0: datetime) -> AllocationResult:
-    """
-    贪心启发式算法
-    
-    按机台效率排序，优先分配到效率最高的机台
-    """
-    
-    # 计算每个产品-机台组合的总TC
-    product_tool_tc = {}
-    for p in inp.products:
-        product_tool_tc[p] = {}
-        for t in inp.tools:
-            total_tc = sum(
-                inp.tc_matrix.get(p, {}).get(t, {}).get(s, 0.0)
-                for s in inp.processes
-                if inp.feasibility.get(p, {}).get(t, {}).get(s, False)
-            )
-            if total_tc > 0:
-                product_tool_tc[p][t] = total_tc
-    
-    # 按需求比例分配
+    """保守贪心算法：先确定每个产品所有制程都能完成的数量，再逐制程占用机台小时。"""
     allocation: dict[str, dict[str, float]] = {p: {} for p in inp.products}
+    process_allocation: dict[str, dict[str, dict[str, float]]] = {p: {} for p in inp.products}
     tool_remaining_hours = dict(inp.available_hours)
     product_output: dict[str, float] = {p: 0.0 for p in inp.products}
     
@@ -275,35 +293,85 @@ def _solve_greedy(inp: AllocationInput, feasible_pairs: list, t0: datetime) -> A
         key=lambda p: inp.demand_target.get(p, 0),
         reverse=True
     )
+
+    def try_allocate_product(
+        product_id: str,
+        quantity: float,
+        remaining_hours: dict[str, float],
+    ) -> tuple[dict[str, float], dict[str, float], dict[str, dict[str, float]]] | None:
+        shadow_hours = dict(remaining_hours)
+        candidate_allocation: dict[str, float] = {}
+        candidate_process_allocation: dict[str, dict[str, float]] = {}
+        for process_id in inp.processes:
+            remaining_step_qty = quantity
+            options: list[tuple[str, float]] = []
+            for tool_id in inp.tools:
+                if not inp.feasibility.get(product_id, {}).get(tool_id, {}).get(process_id, False):
+                    continue
+                tc = float(inp.tc_matrix.get(product_id, {}).get(tool_id, {}).get(process_id, 0.0) or 0.0)
+                if tc <= 0 or shadow_hours.get(tool_id, 0.0) <= 0:
+                    continue
+                options.append((tool_id, tc))
+            options.sort(key=lambda item: item[1])
+
+            for tool_id, tc in options:
+                if remaining_step_qty <= 0:
+                    break
+                assign = min(remaining_step_qty, shadow_hours.get(tool_id, 0.0) / tc)
+                if assign <= 0:
+                    continue
+                candidate_process_allocation.setdefault(tool_id, {})
+                candidate_process_allocation[tool_id][process_id] = (
+                    candidate_process_allocation[tool_id].get(process_id, 0.0) + assign
+                )
+                candidate_allocation[tool_id] = candidate_allocation.get(tool_id, 0.0) + assign
+                shadow_hours[tool_id] = max(0.0, shadow_hours.get(tool_id, 0.0) - assign * tc)
+                remaining_step_qty -= assign
+
+            if remaining_step_qty > 0.001:
+                return None
+        return shadow_hours, candidate_allocation, candidate_process_allocation
     
     for p in products_sorted:
         target = inp.demand_target.get(p, 0)
         if target <= 0:
             continue
-        
-        # 找出该产品可用的机台，按效率排序（TC越小越好）
-        available_tools = [
-            (t, tc) for t, tc in product_tool_tc.get(p, {}).items()
-            if tc > 0 and tool_remaining_hours.get(t, 0) > 0
-        ]
-        available_tools.sort(key=lambda x: x[1])  # TC升序
-        
-        remaining_demand = target
-        for t, tc in available_tools:
-            if remaining_demand <= 0:
-                break
-            
-            # 该机台能产出多少
-            hours_available = tool_remaining_hours[t]
-            max_output = hours_available / tc if tc > 0 else 0
-            
-            # 分配量
-            assign = min(remaining_demand, max_output)
-            if assign > 0:
-                allocation[p][t] = assign
-                product_output[p] += assign
-                tool_remaining_hours[t] -= assign * tc
-                remaining_demand -= assign
+
+        upper_bound = target
+        for s in inp.processes:
+            options = []
+            for t in inp.tools:
+                if not inp.feasibility.get(p, {}).get(t, {}).get(s, False):
+                    continue
+                tc = float(inp.tc_matrix.get(p, {}).get(t, {}).get(s, 0.0) or 0.0)
+                if tc <= 0 or tool_remaining_hours.get(t, 0.0) <= 0:
+                    continue
+                options.append((t, tc))
+            upper_bound = min(upper_bound, sum(tool_remaining_hours.get(t, 0.0) / tc for t, tc in options))
+
+        if upper_bound <= 0:
+            continue
+
+        low = 0.0
+        high = upper_bound
+        best_candidate = None
+        for _ in range(24):
+            mid = (low + high) / 2.0
+            candidate = try_allocate_product(p, mid, tool_remaining_hours)
+            if candidate is not None:
+                low = mid
+                best_candidate = candidate
+            else:
+                high = mid
+
+        if best_candidate is None or low <= 0.001:
+            continue
+
+        new_remaining_hours, candidate_allocation, candidate_process_allocation = best_candidate
+        tool_remaining_hours = new_remaining_hours
+        allocation[p] = candidate_allocation
+        process_allocation[p] = candidate_process_allocation
+        product_output[p] = low
     
     # 计算利用率
     tool_utilization: dict[str, float] = {}
@@ -312,7 +380,7 @@ def _solve_greedy(inp: AllocationInput, feasible_pairs: list, t0: datetime) -> A
         cap = inp.available_hours.get(t, 1.0)
         tool_utilization[t] = (used_hours / cap * 100.0) if cap > 0 else 0.0
     
-    bottleneck_tools = [t for t, u in tool_utilization.items() if u >= 85.0]
+    bottleneck_tools = [t for t, u in tool_utilization.items() if u >= 99.0]
     unmet_demand = {
         p: inp.demand_target.get(p, 0) - product_output[p]
         for p in inp.products
@@ -324,7 +392,7 @@ def _solve_greedy(inp: AllocationInput, feasible_pairs: list, t0: datetime) -> A
     return AllocationResult(
         status="heuristic",
         allocation=allocation,
-        process_allocation={},
+        process_allocation=process_allocation,
         tool_utilization=tool_utilization,
         product_output=product_output,
         bottleneck_tools=bottleneck_tools,
@@ -332,7 +400,12 @@ def _solve_greedy(inp: AllocationInput, feasible_pairs: list, t0: datetime) -> A
         objective_value=total_output,
         solve_time_seconds=(datetime.utcnow() - t0).total_seconds(),
         computed_at=datetime.utcnow(),
-        metadata={"method": "greedy_heuristic", "note": "LP solver not available"},
+        metadata={
+            "method": "greedy_heuristic",
+            "decision_quality": "heuristic_feasible_plan",
+            "note": "LP solver not available or failed; result is conservative and should be solver-validated before formal commitment.",
+            "output_semantics": "product_output is completed wafers; allocation is process-wafer workload by tool",
+        },
     )
 
 
